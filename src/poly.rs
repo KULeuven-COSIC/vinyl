@@ -1,9 +1,10 @@
 use std::ops::{Add, Div, Mul, Sub};
 
-use crate::params::Modular;
+use crate::modular::Modular;
 use concrete_fft::fft128::f128;
 
-// Store as coefficient vector, constant term first
+// NOTE: Might want to switch to FLINT if too inefficient?
+/// A polynomial, stored as a coefficient vector, constant term first
 #[derive(Debug, Clone)]
 pub struct Poly<T>(Vec<T>);
 
@@ -87,14 +88,17 @@ where
     T: Modular,
     T::Base: From<u64>,
 {
+    /// Create a new polynomial of degree `n`, initialized to the all-zero polynomial
     pub fn new(n: u64) -> Self {
         Self(vec![T::construct(From::from(0)); n as usize])
     }
 
+    /// Iterate over coefficients, constant term first
     pub fn iter(&self) -> impl Iterator<Item = &T> + '_ {
         self.0.iter()
     }
 
+    /// Iterate over coefficients, constant term first; mutably
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> + '_ {
         self.0.iter_mut()
     }
@@ -110,6 +114,7 @@ impl<T> IntoIterator for Poly<T> {
     }
 }
 
+/// Allow to define traits that act pointwise (or scalar) over the elements of something iterable
 macro_rules! pointwise(
     ($trt: ident, $fn: ident, $t: ident) => {
         impl<T> $trt<$t<T>> for $t<T>
@@ -150,5 +155,6 @@ pointwise!(Sub, sub, Poly);
 pointwise!(scalar, Mul, mul, Poly);
 pointwise!(scalar, Div, div, Poly);
 
+/// A polynomial stored in FFT form
 #[derive(Debug, Clone)]
 pub struct FFTPoly(Vec<f128>);
