@@ -1,3 +1,4 @@
+pub mod ciphertext;
 pub mod key;
 pub(crate) mod modular;
 pub mod params;

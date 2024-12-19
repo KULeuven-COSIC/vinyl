@@ -1,47 +1,40 @@
 use std::ops::{Add, Div, Mul, Sub};
 
-use crate::modular::Modular;
 use concrete_fft::fft128::f128;
+use swanky_field::PrimeFiniteField;
 
 // NOTE: Might want to switch to FLINT if too inefficient?
 /// A polynomial, stored as a coefficient vector, constant term first
 #[derive(Debug, Clone)]
 pub struct Poly<T>(Vec<T>);
 
-impl<T> Poly<T>
+impl<F> Poly<F>
 where
-    T: std::fmt::Debug,
-    T: Modular,
-    T::Base: From<u64> + TryInto<u64>,
-    T::Base: PartialOrd,
+    F: PrimeFiniteField,
 {
+    const _LIMB_NUM: () = assert!(F::MIN_LIMBS_NEEDED == 1);
+    const _LIMB_SIZE: () =
+        assert!(crypto_bigint::Limb::BITS <= flint_sys::deps::mp_limb_t::BITS as usize);
+
     /// Return the `inv: Poly<T>` such that `inv * self = 1 (mod x^n + 1)`
     /// None when not invertible
-    pub fn invert(&self) -> Option<Poly<T>> {
+    pub fn invert(&self) -> Option<Poly<F>> {
         use flint_sys::deps::mp_limb_t;
         use flint_sys::nmod_poly::*;
 
-        debug_assert!(self.0.len() > 0);
-        debug_assert!(self.0[0].modulus() <= From::from(mp_limb_t::MAX));
-        debug_assert!(mp_limb_t::BITS >= u64::BITS);
+        debug_assert!(!self.0.is_empty());
 
-        let modulus: mp_limb_t = self.0[0]
-            .modulus()
-            .try_into()
-            .map_err(|_| ())
-            .expect("Should be caught by debug_assert");
+        let modulus: mp_limb_t = F::modulus_int().into();
+
         let mut me = unsafe {
             let mut me = std::mem::MaybeUninit::uninit();
             nmod_poly_init2(me.as_mut_ptr(), modulus, self.0.len() as i64);
             for (i, x) in self.iter().enumerate() {
-                nmod_poly_set_coeff_ui(
-                    me.as_mut_ptr(),
-                    i as i64,
-                    x.residue().try_into().map_err(|_| ()).unwrap(),
-                );
+                nmod_poly_set_coeff_ui(me.as_mut_ptr(), i as i64, x.into_int().into());
             }
             me.assume_init()
         };
+
         let mut defpoly = unsafe {
             let mut r = std::mem::MaybeUninit::uninit();
             nmod_poly_init2(r.as_mut_ptr(), modulus, self.0.len() as i64 + 1);
@@ -49,11 +42,13 @@ where
             nmod_poly_set_coeff_ui(r.as_mut_ptr(), self.0.len() as i64, 1);
             r.assume_init()
         };
+
         let mut res = unsafe {
             let mut r = std::mem::MaybeUninit::uninit();
             nmod_poly_init(r.as_mut_ptr(), modulus);
             r.assume_init()
         };
+
         let status = unsafe {
             nmod_poly_invmod(
                 &mut res as *mut _,
@@ -67,9 +62,8 @@ where
         } else {
             let mut v = Vec::with_capacity(self.0.len());
             for i in 0..self.0.len() {
-                v.push(T::construct(From::from(unsafe {
-                    nmod_poly_get_coeff_ui(&mut res as *mut _, i as i64)
-                })));
+                let coef = unsafe { nmod_poly_get_coeff_ui(&mut res as *mut _, i as i64) };
+                v.push(F::try_from_int::<1>(coef.into()).expect("Non-reduced element from flint"));
             }
             Some(Self(v))
         };
@@ -85,12 +79,11 @@ where
 
 impl<T> Poly<T>
 where
-    T: Modular,
-    T::Base: From<u64>,
+    T: swanky_field::PrimeFiniteField,
 {
     /// Create a new polynomial of degree `n`, initialized to the all-zero polynomial
     pub fn new(n: u64) -> Self {
-        Self(vec![T::construct(From::from(0)); n as usize])
+        Self(vec![T::ZERO; n as usize])
     }
 
     /// Iterate over coefficients, constant term first
