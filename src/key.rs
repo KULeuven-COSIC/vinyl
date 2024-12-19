@@ -36,14 +36,19 @@ impl LWEKey {
         }
     }
 
-    /// Obtain the `i`th component of the key
-    /// as a bit (0 or 1 in the field).
-    pub(crate) fn get<F: FiniteField>(&self, i: usize) -> F {
+    /// Get a bit, u8 because it's more of a number than a truth value
+    fn get_bit(&self, i: usize) -> u8 {
         #[cfg(debug_assertions)]
         debug_assert!((0..self.dim).contains(&i));
 
         // Entirely little endian, to the bit level
-        bit_to_field(((self.key[i / 64] >> (i % 64)) & 1) as u8)
+        ((self.key[i / 64] >> (i % 64)) & 1) as u8
+    }
+
+    /// Obtain the `i`th component of the key
+    /// as a bit (0 or 1 in the field).
+    pub(crate) fn get<F: FiniteField>(&self, i: usize) -> F {
+        bit_to_field(self.get_bit(i))
     }
 
     /// Iterate over the key bits
@@ -122,8 +127,8 @@ fn sample_ternary<F: PrimeFiniteField>(rng: &mut impl Rng) -> F {
 
 impl<F: PrimeFiniteField> NTRUKey<F> {
     /// Generate a fresh NTRU/NGS key of given degree
-    fn new(deg: u64, rng: &mut impl Rng) -> Self {
-        let mut f = Poly::<F>::new(deg);
+    fn new<BoI, BaI>(params: &Params<BoI, BaI>, rng: &mut impl Rng) -> Self {
+        let mut f = Poly::<F>::new(1 << params.log_deg_ntru);
         let scale: F = int_to_field(4u8.into());
 
         // Until we find an invertible vector
@@ -153,33 +158,76 @@ impl<F> KskNtruLwe<F> {
 
 /// A FINAL bootstrapping key: encryptions of an LWE secret key under the NTRU boot key
 /// ready for use in CMUX gates.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct Bsk();
+
+/// A FINAL public key, contains keyswitching and bootstrapping keys
+#[derive(Clone, Debug)]
+pub struct PublicKey<BootInt: 'static, BaseInt: 'static> {
+    params: &'static Params<BootInt, BaseInt>,
+    ksk: KskNtruLwe<BootInt>,
+    bsk: Bsk,
+}
 
 /// A full FINAL key, including all private key material
 #[derive(Debug)]
 pub struct Key<BootInt: 'static, BaseInt: 'static> {
     params: &'static Params<BootInt, BaseInt>,
     base: LWEKey,
+    #[cfg(debug_assertions)]
+    /// The key used for the NGS things, decryption isn't needed during regular execution
+    /// but to debug could be useful
     boot: NTRUKey<BootInt>,
-    ksk: KskNtruLwe<BootInt>,
-    bsk: Bsk,
+    public: PublicKey<BootInt, BaseInt>,
 }
 
 impl<BoI, BaI> Key<BoI, BaI>
 where
     BoI: PrimeFiniteField,
+    BaI: PrimeFiniteField,
 {
     pub fn new(params: &'static Params<BoI, BaI>, rng: &mut impl Rng) -> Self {
         let base = LWEKey::new(params, rng);
-        let boot = NTRUKey::new(1 << params.log_deg_ntru, rng);
+        let boot = NTRUKey::new(params, rng);
         let ksk = KskNtruLwe::new(&boot.clone(), &base); // Check what kind of modswitching we may need
         Key {
             params,
             base,
+            #[cfg(debug_assertions)]
             boot,
-            ksk,
-            bsk: Bsk(),
+            public: PublicKey {
+                params,
+                ksk,
+                bsk: Bsk(),
+            },
+        }
+    }
+
+    pub fn export(&self) -> &PublicKey<BoI, BaI> {
+        &self.public
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use rand::SeedableRng;
+
+    use super::*;
+
+    fn rng(seed: Option<u64>) -> impl Rng {
+        rand::rngs::StdRng::seed_from_u64(seed.unwrap_or(1337))
+    }
+
+    #[test]
+    fn test_lwe_roundtrip() {
+        let rng = &mut rng(None);
+        let params = &crate::params::TESTPARAMS;
+        let key = LWEKey::new(params, rng);
+        for _ in 0..100 {
+            let ct0 = key.encrypt(0, params, rng);
+            assert_eq!(key.decrypt(ct0, params), 0);
+            let ct1 = key.encrypt(1, params, rng);
+            assert_eq!(key.decrypt(ct1, params), 1);
         }
     }
 }
