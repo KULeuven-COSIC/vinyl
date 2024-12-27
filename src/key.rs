@@ -1,11 +1,11 @@
 //! Defining all sorts of cryptographic keys and the operations they can perform
 
-use crate::ciphertext::LweCiphertext;
+use crate::ciphertext::{LweCiphertext, NtruScalarCiphertext, NtruVectorCiphertext};
 use crate::modular::{bit_to_field, int_to_field, sample_discrete_gaussian};
 use crate::params::{Params, Rng};
-use crate::poly::Poly;
+use crate::poly::{FFTPoly, Poly};
 
-use swanky_field::{FiniteField, PrimeFiniteField, StatisticallySecureField};
+use swanky_field::{FiniteField, PrimeFiniteField};
 
 /// An LWE secret key (binary)
 #[derive(Debug)]
@@ -68,13 +68,12 @@ impl LWEKey {
         rng: &mut impl Rng,
     ) -> LweCiphertext<BaI>
     where
-        // TODO: Does this impact security if we'd have a bias on the a's
-        BaI: StatisticallySecureField + PrimeFiniteField,
+        BaI: PrimeFiniteField,
     {
         debug_assert!(message == 0 || message == 1);
 
         let mut ct = LweCiphertext {
-            a: Vec::with_capacity(self.dim),
+            a: Vec::with_capacity(params.dim_lwe),
             b: BaI::ZERO,
         };
 
@@ -114,9 +113,12 @@ impl LWEKey {
 /// An NTRU/NGS key, storing both the original polynomial 4f' + 1,
 /// and its inverse mod X^N + 1
 #[derive(Debug, Clone)]
-struct NTRUKey<F> {
-    f: Poly<F>,
-    finv: Poly<F>,
+struct NTRUKey {
+    #[cfg(debug_assertions)]
+    /// `4*f' + 1`, the polynomial before inversion
+    f: FFTPoly,
+    /// `f^-1` the actual thing used for encryption in practice
+    finv: FFTPoly,
 }
 
 /// Sample a random ternary element, embedded into the modular type M
@@ -125,33 +127,49 @@ fn sample_ternary<F: PrimeFiniteField>(rng: &mut impl Rng) -> F {
     int_to_field::<F>(r) - F::ONE
 }
 
-impl<F: PrimeFiniteField> NTRUKey<F> {
+impl NTRUKey {
     /// Generate a fresh NTRU/NGS key of given degree
-    fn new<BoI, BaI>(params: &Params<BoI, BaI>, rng: &mut impl Rng) -> Self {
-        let mut f = Poly::<F>::new(1 << params.log_deg_ntru);
-        let scale: F = int_to_field(4u8.into());
+    fn new<BoI: PrimeFiniteField, BaI>(params: &Params<BoI, BaI>, rng: &mut impl Rng) -> Self {
+        let mut f = Poly::<BoI>::new(1 << params.log_deg_ntru);
+        let scale: BoI = int_to_field(4u8.into());
 
         // Until we find an invertible vector
         loop {
-            f.iter_mut()
-                .for_each(|x| *x = scale * sample_ternary(rng) + F::ONE);
+            f.iter_mut().for_each(|x| *x = scale * sample_ternary(rng));
+            f = f + BoI::ONE;
             if let Some(finv) = f.invert() {
-                return Self { f, finv };
+                return Self {
+                    #[cfg(debug_assertions)]
+                    f: params.fft.fwd(f),
+                    finv: params.fft.fwd(finv),
+                };
             }
         }
+    }
+
+    fn enc_bit_vec<BoI: PrimeFiniteField, BaI>(
+        bit: u8,
+        params: &Params<BoI, BaI>,
+        rng: &mut impl Rng,
+    ) -> NtruVectorCiphertext {
+        let mut g = Poly::<BoI>::new(1 << params.log_deg_ntru);
+        g.iter_mut().for_each(|x| {
+            *x = int_to_field(sample_discrete_gaussian(params.err_stdev_ntru, rng).into())
+        });
+        todo!() // Needs FFT from here :)
     }
 }
 
 // TODO
 // also TODO: Distinguish from LWE->LWE KSK
 /// A key-switching key from NTRU to LWE
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct KskNtruLwe<F>(std::marker::PhantomData<F>);
 
 impl<F> KskNtruLwe<F> {
     /// Build a KSK that transfers from ciphertext under the ntru key
     /// to ciphertexts under the lwe key
-    fn new(ntru: &NTRUKey<F>, lwe: &LWEKey) -> Self {
+    fn new(ntru: &NTRUKey, lwe: &LWEKey) -> Self {
         todo!()
     }
 }
@@ -163,30 +181,30 @@ struct Bsk();
 
 /// A FINAL public key, contains keyswitching and bootstrapping keys
 #[derive(Clone, Debug)]
-pub struct PublicKey<BootInt: 'static, BaseInt: 'static> {
-    params: &'static Params<BootInt, BaseInt>,
+pub struct PublicKey<'a, BootInt, BaseInt> {
+    params: &'a Params<BootInt, BaseInt>,
     ksk: KskNtruLwe<BootInt>,
     bsk: Bsk,
 }
 
 /// A full FINAL key, including all private key material
 #[derive(Debug)]
-pub struct Key<BootInt: 'static, BaseInt: 'static> {
-    params: &'static Params<BootInt, BaseInt>,
+pub struct Key<'a, BootInt, BaseInt> {
+    params: &'a Params<BootInt, BaseInt>,
     base: LWEKey,
     #[cfg(debug_assertions)]
     /// The key used for the NGS things, decryption isn't needed during regular execution
     /// but to debug could be useful
-    boot: NTRUKey<BootInt>,
-    public: PublicKey<BootInt, BaseInt>,
+    boot: NTRUKey,
+    public: PublicKey<'a, BootInt, BaseInt>,
 }
 
-impl<BoI, BaI> Key<BoI, BaI>
+impl<'a, BoI, BaI> Key<'a, BoI, BaI>
 where
     BoI: PrimeFiniteField,
     BaI: PrimeFiniteField,
 {
-    pub fn new(params: &'static Params<BoI, BaI>, rng: &mut impl Rng) -> Self {
+    pub fn new(params: &'a Params<BoI, BaI>, rng: &mut impl Rng) -> Self {
         let base = LWEKey::new(params, rng);
         let boot = NTRUKey::new(params, rng);
         let ksk = KskNtruLwe::new(&boot.clone(), &base); // Check what kind of modswitching we may need
@@ -210,9 +228,9 @@ where
 
 #[cfg(test)]
 mod test {
-    use rand::SeedableRng;
-
     use super::*;
+
+    use rand::SeedableRng;
 
     fn rng(seed: Option<u64>) -> impl Rng {
         rand::rngs::StdRng::seed_from_u64(seed.unwrap_or(1337))

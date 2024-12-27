@@ -1,6 +1,8 @@
 //! Parameters defining the entire scheme
 
-use crate::modular::Q61;
+use crate::modular::{M31, Q61};
+
+use std::sync::LazyLock;
 
 /// A cryptographically secure RNG trait for convenience
 pub trait Rng: rand::Rng + rand::CryptoRng {}
@@ -20,15 +22,40 @@ pub struct Params<BootInt, BaseInt> {
     pub(crate) err_stdev_lwe: f64,
     /// The (discrete) distribution used for fresh NTRU noise polynomials
     pub(crate) err_stdev_ntru: f64,
+
+    // NOTE: Putting the lazylock on this doesn't entirely solve
+    // the issue of caching initialization, as (in theory) you could
+    // use multiple `Params` instances with the same ntru degree and
+    // hence duplicate FFTPlan work/space.
+    // It's fine in practice though :)
+    /// The fft plan/engine to use
+    pub(crate) fft: LazyLock<crate::fft::FFTPlan>,
 }
+
+#[cfg(test)]
+pub(crate) type TESTTYPE = M31;
 
 // TODO: check!
 /// Some parameters to test the scheme with during development
-pub const TESTPARAMS: Params<Q61, Q61> = Params {
+pub static TESTPARAMS: Params<M31, M31> = Params {
     _tp: std::marker::PhantomData,
     dim_lwe: 930,
-    log_deg_ntru: 14,
+    log_deg_ntru: 10,
     dim_ngs: 3,
     err_stdev_lwe: 4.39,
     err_stdev_ntru: 4.39,
+
+    fft: LazyLock::new(|| crate::fft::FFTPlan::new(1 << 10)),
+};
+
+// TODO: check, this is entirely random garbage
+pub static LARGEPARAMS: Params<Q61, Q61> = Params {
+    _tp: std::marker::PhantomData,
+    dim_lwe: 2048,
+    log_deg_ntru: 14,
+    dim_ngs: 4,
+    err_stdev_lwe: 12.0,
+    err_stdev_ntru: 12.0,
+
+    fft: LazyLock::new(|| crate::fft::FFTPlan::new(1 << 14)),
 };

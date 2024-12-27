@@ -1,12 +1,14 @@
 use std::ops::{Add, Div, Mul, Sub};
 
-use concrete_fft::fft128::f128;
 use swanky_field::PrimeFiniteField;
+use tfhe_fft::fft128::f128;
+
+use crate::params::Rng;
 
 // NOTE: Might want to switch to FLINT if too inefficient?
 /// A polynomial, stored as a coefficient vector, constant term first
-#[derive(Debug, Clone)]
-pub struct Poly<T>(Vec<T>);
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Poly<T>(pub(crate) Vec<T>);
 
 impl<F> Poly<F>
 where
@@ -81,9 +83,16 @@ impl<T> Poly<T>
 where
     T: swanky_field::PrimeFiniteField,
 {
-    /// Create a new polynomial of degree `n`, initialized to the all-zero polynomial
-    pub fn new(n: u64) -> Self {
-        Self(vec![T::ZERO; n as usize])
+    /// Create a new polynomial of degree `n - 1`, initialized to the all-zero polynomial
+    pub fn new(n: usize) -> Self {
+        Self(vec![T::ZERO; n])
+    }
+
+    /// Generate a random polynomial over `T` of degree `n - 1`
+    pub fn rand(n: usize, rng: &mut impl Rng) -> Self {
+        Self(Vec::from_iter(
+            std::iter::from_fn(|| Some(T::random(rng))).take(n),
+        ))
     }
 
     /// Iterate over coefficients, constant term first
@@ -94,6 +103,16 @@ where
     /// Iterate over coefficients, constant term first; mutably
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> + '_ {
         self.0.iter_mut()
+    }
+
+    /// What's the degree of this polynomial?
+    pub fn degree(&self) -> usize {
+        self.0.len() - 1
+    }
+
+    /// Get a specific coefficient
+    pub(crate) fn get(&self, i: usize) -> T {
+        self.0[i]
     }
 }
 
@@ -148,6 +167,15 @@ pointwise!(Sub, sub, Poly);
 pointwise!(scalar, Mul, mul, Poly);
 pointwise!(scalar, Div, div, Poly);
 
+impl<F: PrimeFiniteField> Add<F> for Poly<F> {
+    type Output = Poly<F>;
+
+    fn add(mut self, rhs: F) -> Self::Output {
+        self.0[0] += rhs;
+        self
+    }
+}
+
 /// A polynomial stored in FFT form
 #[derive(Debug, Clone)]
-pub struct FFTPoly(Vec<f128>);
+pub struct FFTPoly(pub(crate) Vec<num_complex::Complex<f128>>);
