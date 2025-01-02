@@ -9,158 +9,245 @@ pub trait ModSwitch<Target> {
 
 const _REQUIRE_64BIT_LIMB: () = assert!(crypto_bigint::Word::BITS == 64);
 
-/// Integers modulo the 61-bit prime 2^61 - 1
-pub type Q61 = swanky_field_f61p::F61p;
+/// A type that has a modulus
+pub(crate) trait Modular {
+    /// The type needed to represent a fully reduced number
+    type Single;
+    /// Type type needed to represent the product of two fully reduced numbers
+    type Double;
 
-mod m31 {
-    #![allow(clippy::suspicious_op_assign_impl)]
+    const MOD: Self::Single;
 
-    use std::ops::{AddAssign, MulAssign, SubAssign};
+    fn new_unchecked(x: Self::Single) -> Self;
+}
 
-    use crypto_bigint::subtle::{ConditionallySelectable, ConstantTimeEq};
-    use swanky_field::{FiniteField, FiniteRing, PrimeFiniteField};
-    use swanky_serialization::{BiggerThanModulus, CanonicalSerialize};
-
-    // Mostly referenced from the F61p implementation
-    /// Integers modulo the Mersenne prime 2^31 - 1
-    #[allow(clippy::derived_hash_with_manual_eq)]
-    #[derive(Copy, Clone, Debug, Eq, PartialOrd, Ord, Hash)]
-    pub struct M31(u32);
-    const MOD: u32 = (1 << 31) - 1;
-
-    impl TryFrom<u128> for M31 {
-        type Error = BiggerThanModulus;
-
-        fn try_from(value: u128) -> Result<Self, Self::Error> {
-            if value < MOD as u128 {
-                Ok(Self(value as u32))
-            } else {
-                Err(BiggerThanModulus)
-            }
-        }
-    }
-
-    impl ConstantTimeEq for M31 {
-        fn ct_eq(&self, other: &Self) -> crypto_bigint::subtle::Choice {
-            self.0.ct_eq(&other.0)
-        }
-    }
-
-    impl ConditionallySelectable for M31 {
-        fn conditional_select(a: &Self, b: &Self, choice: crypto_bigint::subtle::Choice) -> Self {
-            Self(u32::conditional_select(&a.0, &b.0, choice))
-        }
-    }
-
-    fn reduce(x: u64) -> M31 {
-        let y = (x & MOD as u64) + (x >> 31);
-        M31(u32::conditional_select(
-            &(y as u32),
-            &(y.wrapping_sub(MOD as u64) as u32),
-            ((y >= MOD as u64) as u8).into(),
-        ))
-    }
-
-    impl AddAssign<&M31> for M31 {
-        fn add_assign(&mut self, rhs: &Self) {
-            *self = reduce(self.0 as u64 + rhs.0 as u64);
-        }
-    }
-
-    impl SubAssign<&M31> for M31 {
-        fn sub_assign(&mut self, rhs: &Self) {
-            *self = reduce(self.0 as u64 + MOD as u64 - rhs.0 as u64);
-        }
-    }
-
-    impl MulAssign<&M31> for M31 {
-        fn mul_assign(&mut self, rhs: &Self) {
-            *self = reduce(self.0 as u64 * rhs.0 as u64);
-        }
-    }
-
-    impl CanonicalSerialize for M31 {
-        type Serializer = swanky_serialization::ByteElementSerializer<Self>;
-        type Deserializer = swanky_serialization::ByteElementDeserializer<Self>;
-        type ByteReprLen = generic_array::typenum::U4;
-        type FromBytesError = BiggerThanModulus;
-
-        fn from_bytes(
-            bytes: &generic_array::GenericArray<u8, Self::ByteReprLen>,
-        ) -> Result<Self, Self::FromBytesError> {
-            let buf = <[u8; 4]>::from(*bytes);
-            let x = u32::from_le_bytes(buf);
-            Self::try_from(x as u128)
-        }
-
-        fn to_bytes(&self) -> generic_array::GenericArray<u8, Self::ByteReprLen> {
-            self.0.to_le_bytes().into()
-        }
-    }
-
-    swanky_field::field_ops!(M31);
-
-    impl FiniteRing for M31 {
-        fn from_uniform_bytes(x: &[u8; 16]) -> Self {
-            Self((u128::from_le_bytes(*x) % MOD as u128) as u32)
-        }
-
-        fn random<R: rand::Rng + ?Sized>(rng: &mut R) -> Self {
-            Self(rng.gen_range(0..MOD))
-        }
-
-        const ZERO: Self = Self(0);
-        const ONE: Self = Self(1);
-    }
-
-    impl FiniteField for M31 {
-        type PrimeField = Self;
-
-        const GENERATOR: Self = Self(7);
-
-        type NumberOfBitsInBitDecomposition = generic_array::typenum::U31;
-
-        fn bit_decomposition(
-            &self,
-        ) -> generic_array::GenericArray<bool, Self::NumberOfBitsInBitDecomposition> {
-            swanky_field::standard_bit_decomposition(self.0 as u128)
-        }
-
-        fn inverse(&self) -> Self {
-            if *self == Self::ZERO {
-                panic!("Zero cannot be inverted");
-            }
-            self.pow_var_time(MOD as u128 - 2)
-        }
-
-        fn polynomial_modulus() -> swanky_field::polynomial::Polynomial<Self::PrimeField> {
-            swanky_field::polynomial::Polynomial::x()
-        }
-    }
-
-    impl PrimeFiniteField for M31 {
-        fn modulus_int<const LIMBS: usize>() -> crypto_bigint::Uint<LIMBS> {
-            crypto_bigint::Uint::<LIMBS>::from_u32(MOD)
-        }
-
-        fn into_int<const LIMBS: usize>(&self) -> crypto_bigint::Uint<LIMBS> {
-            crypto_bigint::Uint::<LIMBS>::from_u32(self.0)
-        }
-
-        fn try_from_int<const LIMBS: usize>(
-            x: crypto_bigint::Uint<LIMBS>,
-        ) -> crypto_bigint::subtle::CtOption<Self> {
-            use crypto_bigint::subtle::ConstantTimeLess;
-
-            crypto_bigint::subtle::CtOption::new(
-                Self(x.as_words()[0] as u32),
-                x.ct_lt(&Self::modulus_int()),
-            )
-        }
+pub(crate) trait ModReduce
+where
+    Self: Modular + Sized,
+    Self::Double: From<Self::Single> + std::ops::Rem<Output = Self::Double>,
+    Self::Single: TryFrom<Self::Double>,
+    <Self::Single as TryFrom<Self::Double>>::Error: std::fmt::Debug,
+{
+    #[inline]
+    fn reduce(val: Self::Double) -> Self {
+        Self::new_unchecked(
+            Self::Single::try_from(val % Self::Double::from(Self::MOD))
+                .expect("Modular reduction should always fit in Single"),
+        )
     }
 }
 
-pub use m31::M31;
+pub(crate) mod smallfields {
+    macro_rules! small_field {
+        ($mod_name:ident::$name:ident, $single:ty, $double:ty, $mod:expr, $generator:literal) => {
+            impl $crate::modular::ModReduce for $mod_name::$name { }
+            $crate::modular::smallfields::small_field!(@custom_reduce, $mod_name::$name, $single, $double, $mod, $generator);
+        };
+
+        (@custom_reduce, $mod_name:ident::$name:ident, $single:ty, $double:ty, $mod:expr, $generator:literal) => {
+            mod $mod_name {
+                #![allow(clippy::suspicious_op_assign_impl)]
+                use $crate::modular::{Modular, ModReduce};
+                use swanky_field::{FiniteRing, FiniteField};
+                use crypto_bigint::subtle::ConstantTimeEq;
+
+                #[allow(clippy::derived_hash_with_manual_eq)]
+                #[derive(Copy, Clone, Debug, Eq, PartialOrd, Ord, Hash)]
+                pub struct $name($single);
+
+                impl Modular for $name {
+                    type Single = $single;
+                    type Double = $double;
+
+                    const MOD: Self::Single = $mod;
+
+                    #[inline]
+                    fn new_unchecked(x: Self::Single) -> Self {
+                        Self(x)
+                    }
+                }
+
+                impl TryFrom<u128> for $name where Self: Modular {
+                    type Error = swanky_serialization::BiggerThanModulus;
+
+                    #[inline]
+                    fn try_from(value: u128) -> Result<Self, Self::Error> {
+                        if value < Self::MOD.into() {
+                            Ok(Self(value.try_into().expect("Value smaller than modulus that fits")))
+                        } else {
+                            Err(swanky_serialization::BiggerThanModulus)
+                        }
+                    }
+                }
+
+                impl ConstantTimeEq for $name {
+                    #[inline]
+                    fn ct_eq(&self, other: &Self) -> crypto_bigint::subtle::Choice {
+                        self.0.ct_eq(&other.0)
+                    }
+                }
+
+                impl crypto_bigint::subtle::ConditionallySelectable for $name {
+                    #[inline]
+                    fn conditional_select(a: &Self, b: &Self, choice: crypto_bigint::subtle::Choice) -> Self {
+                        Self(<$single>::conditional_select(&a.0, &b.0, choice))
+                    }
+                }
+
+                impl std::ops::AddAssign<&$name> for $name {
+                    #[inline]
+                    fn add_assign(&mut self, rhs: &Self) {
+                        *self = Self::reduce(self.0 as $double + rhs.0 as $double);
+                    }
+                }
+
+                impl std::ops::SubAssign<&$name> for $name {
+                    #[inline]
+                    fn sub_assign(&mut self, rhs: &Self) {
+                        *self = Self::reduce(self.0 as $double + Self::MOD as $double - rhs.0 as $double);
+                    }
+                }
+
+                impl std::ops::MulAssign<&$name> for $name {
+                    #[inline]
+                    fn mul_assign(&mut self, rhs: &Self) {
+                        *self = Self::reduce(self.0 as $double * rhs.0 as $double);
+                    }
+                }
+
+                impl swanky_serialization::CanonicalSerialize for $name {
+                    type Serializer = swanky_serialization::ByteElementSerializer<Self>;
+                    type Deserializer = swanky_serialization::ByteElementDeserializer<Self>;
+                    type ByteReprLen = <generic_array::typenum::Const<{ <$single>::BITS as usize / 8 }> as generic_array::IntoArrayLength>::ArrayLength;
+                    type FromBytesError = swanky_serialization::BiggerThanModulus;
+
+                    #[inline]
+                    fn from_bytes(
+                        bytes: &generic_array::GenericArray<u8, Self::ByteReprLen>,
+                    ) -> Result<Self, Self::FromBytesError> {
+                        let buf = <[u8; <$single>::BITS as usize / 8]>::from(*bytes);
+                        let x = <$single>::from_le_bytes(buf);
+                        Self::try_from(x as u128)
+                    }
+
+                    #[inline]
+                    fn to_bytes(&self) -> generic_array::GenericArray<u8, Self::ByteReprLen> {
+                        self.0.to_le_bytes().into()
+                    }
+                }
+
+                impl swanky_field::FiniteRing for $name {
+                    #[inline]
+                    fn from_uniform_bytes(x: &[u8; 16]) -> Self {
+                        Self((u128::from_le_bytes(*x) % Self::MOD as u128) as $single)
+                    }
+
+                    #[inline]
+                    fn random<R: rand::Rng + ?Sized>(rng: &mut R) -> Self {
+                        Self(rng.gen_range(0..Self::MOD))
+                    }
+
+                    const ZERO: Self = Self(0);
+                    const ONE: Self = Self(1);
+                }
+
+                impl swanky_field::FiniteField for $name {
+                    type PrimeField = Self;
+
+                    const GENERATOR: Self = Self($generator);
+
+                    type NumberOfBitsInBitDecomposition = <generic_array::typenum::Const<{ <$single>::BITS as usize - <Self as Modular>::MOD.leading_zeros() as usize }> as generic_array::IntoArrayLength>::ArrayLength;
+
+                    #[inline]
+                    fn bit_decomposition(
+                        &self,
+                    ) -> generic_array::GenericArray<bool, Self::NumberOfBitsInBitDecomposition> {
+                        swanky_field::standard_bit_decomposition(self.0 as u128)
+                    }
+
+                    // TODO? Faster
+                    #[inline]
+                    fn inverse(&self) -> Self {
+                        if *self == Self::ZERO {
+                            panic!("Zero cannot be inverted");
+                        }
+                        self.pow_var_time(Self::MOD as u128 - 2)
+                    }
+
+                    #[inline]
+                    fn polynomial_modulus() -> swanky_field::polynomial::Polynomial<Self::PrimeField> {
+                        swanky_field::polynomial::Polynomial::x()
+                    }
+                }
+
+                impl swanky_field::PrimeFiniteField for $name {
+                    #[inline]
+                    fn modulus_int<const LIMBS: usize>() -> crypto_bigint::Uint<LIMBS> {
+                        crypto_bigint::Uint::<LIMBS>::from(Self::MOD)
+                    }
+
+                    #[inline]
+                    fn into_int<const LIMBS: usize>(&self) -> crypto_bigint::Uint<LIMBS> {
+                        crypto_bigint::Uint::<LIMBS>::from(self.0)
+                    }
+
+                    #[inline]
+                    fn try_from_int<const LIMBS: usize>(
+                        x: crypto_bigint::Uint<LIMBS>,
+                    ) -> crypto_bigint::subtle::CtOption<Self> {
+                        use crypto_bigint::subtle::ConstantTimeLess;
+
+                        crypto_bigint::subtle::CtOption::new(
+                            // The condition should make sure the default unwrap doesn't matter
+                            // Probably not ct though...
+                            Self(x.as_words()[0].try_into().unwrap_or_default()),
+                            x.ct_lt(&Self::modulus_int()),
+                        )
+                    }
+                }
+
+                swanky_field::field_ops!($name);
+            }
+            #[allow(unused_imports)]
+            pub use $mod_name::$name;
+        };
+    }
+
+    pub(crate) use small_field;
+}
+
+smallfields::small_field!(q20::Q20, u32, u64, 912829, 2);
+
+impl ModReduce for M31 {
+    #[inline]
+    fn reduce(val: Self::Double) -> Self {
+        use crypto_bigint::subtle::ConditionallySelectable;
+
+        let y = (val & Self::MOD as u64) + (val >> 31);
+        Self::new_unchecked(u32::conditional_select(
+            &(y as u32),
+            &(y.wrapping_sub(Self::MOD as u64) as u32),
+            ((y >= Self::MOD as u64) as u8).into(),
+        ))
+    }
+}
+
+smallfields::small_field!(@custom_reduce, m31::M31, u32, u64, (1 << 31) - 1, 7);
+
+impl ModReduce for M61 {
+    #[inline]
+    fn reduce(val: Self::Double) -> Self {
+        use crypto_bigint::subtle::ConditionallySelectable;
+
+        let y = (val & Self::MOD as u128) + (val >> 61);
+        Self::new_unchecked(u64::conditional_select(
+            &(y as u64),
+            &(y.wrapping_sub(Self::MOD as u128) as u64),
+            ((y >= Self::MOD as u128) as u8).into(),
+        ))
+    }
+}
+smallfields::small_field!(@custom_reduce, m61::M61, u64, u128, (1 << 61) - 1, 37);
 
 /// Sample an element from the discrete Gaussian distribution
 /// centered around zero, with given standard deviation.

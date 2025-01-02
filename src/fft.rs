@@ -3,7 +3,7 @@
 
 // TODO: Consider NTTs instead, or smth? (swanky_field_fft?)
 
-use crate::poly::{FFTPoly, Poly};
+use crate::poly::{Complex, FFTPoly, Poly};
 
 use swanky_field::PrimeFiniteField;
 use tfhe_fft::fft128::{f128, Plan};
@@ -111,13 +111,10 @@ impl FFTPlan {
 
         let mut res = Vec::with_capacity(n);
         for i in 0..n {
-            res.push(num_complex::Complex::new(
-                f128(re0[i], re1[i]),
-                f128(im0[i], im1[i]),
-            ));
+            res.push(Complex::new(f128(re0[i], re1[i]), f128(im0[i], im1[i])));
         }
 
-        FFTPoly(res)
+        FFTPoly::new(res)
     }
 
     /// The inverse FFT transformation
@@ -294,16 +291,12 @@ mod test {
 
             let a_fft = plan.fwd(a);
             let b_fft = plan.fwd(b);
-            let c_fft = FFTPoly(Vec::from_iter(
+            let c_fft = FFTPoly::new(Vec::from_iter(
                 a_fft
                     .0
                     .into_iter()
                     .zip(b_fft.0.into_iter())
-                    // TODO: f128 is missing traits to make Complex<f128> multiply properly??
-                    .map(|(x, y)| num_complex::Complex {
-                        re: x.re * y.re - x.im * y.im,
-                        im: x.re * y.im + x.im * y.re,
-                    }),
+                    .map(|(x, y)| x * y),
             ));
 
             let c: Poly<F> = plan.inv(c_fft);

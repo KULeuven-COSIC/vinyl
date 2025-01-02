@@ -1,6 +1,6 @@
 //! Defining all sorts of cryptographic keys and the operations they can perform
 
-use crate::ciphertext::{LweCiphertext, NtruScalarCiphertext, NtruVectorCiphertext};
+use crate::ciphertext::{LweCiphertext, NtruVectorCiphertext};
 use crate::modular::{bit_to_field, int_to_field, sample_discrete_gaussian};
 use crate::params::{Params, Rng};
 use crate::poly::{FFTPoly, Poly};
@@ -148,15 +148,30 @@ impl NTRUKey {
     }
 
     fn enc_bit_vec<BoI: PrimeFiniteField, BaI>(
+        &self,
         bit: u8,
         params: &Params<BoI, BaI>,
         rng: &mut impl Rng,
     ) -> NtruVectorCiphertext {
-        let mut g = Poly::<BoI>::new(1 << params.log_deg_ntru);
-        g.iter_mut().for_each(|x| {
-            *x = int_to_field(sample_discrete_gaussian(params.err_stdev_ntru, rng).into())
-        });
-        todo!() // Needs FFT from here :)
+        let mut res = Vec::with_capacity(params.dim_ngs);
+        let mut gadget_base_pow =
+            BoI::try_from_int::<1>(bit.into()).expect("A bit should fit any field");
+        for _ in 0..params.dim_ngs {
+            let mut g = Poly::<BoI>::new(1 << params.log_deg_ntru);
+            g.iter_mut().for_each(|x| {
+                // TODO: is this discrete gaussian or ternary?
+                *x = int_to_field(sample_discrete_gaussian(params.err_stdev_ntru, rng).into())
+            });
+
+            // g / f
+            let mut component: Poly<BoI> = params.fft.inv::<BoI>(params.fft.fwd(g) * &self.finv);
+            // g / f + m * B^i
+            component.0[0] += gadget_base_pow;
+
+            gadget_base_pow *= params.gadget_base;
+            res.push(params.fft.fwd(component))
+        }
+        NtruVectorCiphertext { vec: res }
     }
 }
 

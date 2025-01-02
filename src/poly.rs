@@ -5,6 +5,107 @@ use tfhe_fft::fft128::f128;
 
 use crate::params::Rng;
 
+// TODO? Move somewhere dedicated
+/// Complex numbers, generic over the base type
+/// We implement this ourselves because tfhe_fft::fft128::f128 doesn't implement `Num`,
+/// but `num_complex::Complex<T>` requires it to provide useful operations
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Complex<T> {
+    pub re: T,
+    pub im: T,
+}
+
+impl<T> Complex<T> {
+    pub fn new(re: T, im: T) -> Self {
+        Self { re, im }
+    }
+}
+
+impl<T> Add<&Complex<T>> for Complex<T>
+where
+    T: for<'a> Add<&'a T, Output = T>,
+{
+    type Output = Complex<T>;
+
+    fn add(self, rhs: &Complex<T>) -> Self::Output {
+        Self {
+            re: self.re + &rhs.re,
+            im: self.im + &rhs.im,
+        }
+    }
+}
+
+impl<T> Add<Complex<T>> for Complex<T>
+where
+    T: Add<T, Output = T>,
+{
+    type Output = Complex<T>;
+
+    fn add(self, rhs: Complex<T>) -> Self::Output {
+        Self {
+            re: self.re + rhs.re,
+            im: self.im + rhs.im,
+        }
+    }
+}
+
+// Kinda sucks that we need to clone more, and can't mult f128 * &f128; but oh well
+impl<T> Mul<&Complex<T>> for Complex<T>
+where
+    T: Mul<T, Output = T> + Sub<T, Output = T> + Add<T, Output = T> + Clone,
+{
+    type Output = Complex<T>;
+
+    fn mul(self, rhs: &Complex<T>) -> Self::Output {
+        Self {
+            re: self.re.clone() * rhs.re.clone() - self.im.clone() * rhs.im.clone(),
+            im: self.re * rhs.im.clone() + self.im * rhs.re.clone(),
+        }
+    }
+}
+
+impl<T> Mul<Complex<T>> for Complex<T>
+where
+    T: Mul<T, Output = T> + Sub<T, Output = T> + Add<T, Output = T> + Clone,
+{
+    type Output = Complex<T>;
+
+    fn mul(self, rhs: Complex<T>) -> Self::Output {
+        Self {
+            re: self.re.clone() * rhs.re.clone() - self.im.clone() * rhs.im.clone(),
+            im: self.re * rhs.im + self.im * rhs.re,
+        }
+    }
+}
+
+impl<T> Mul<&T> for Complex<T>
+where
+    T: for<'a> Mul<&'a T, Output = T>,
+{
+    type Output = Complex<T>;
+
+    fn mul(self, rhs: &T) -> Self::Output {
+        Self {
+            re: self.re * rhs,
+            im: self.im * rhs,
+        }
+    }
+}
+
+impl<T> Mul<T> for Complex<T>
+where
+    T: Mul<T, Output = T> + Clone,
+{
+    type Output = Complex<T>;
+
+    fn mul(self, rhs: T) -> Self::Output {
+        Self {
+            re: self.re * rhs.clone(),
+            im: self.im * rhs,
+        }
+    }
+}
+
 // NOTE: Might want to switch to FLINT if too inefficient?
 /// A polynomial, stored as a coefficient vector, constant term first
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,24 +180,9 @@ where
     }
 }
 
-impl<T> Poly<T>
-where
-    T: swanky_field::PrimeFiniteField,
-{
-    /// Create a new polynomial of degree `n - 1`, initialized to the all-zero polynomial
-    pub fn new(n: usize) -> Self {
-        Self(vec![T::ZERO; n])
-    }
-
-    /// Generate a random polynomial over `T` of degree `n - 1`
-    pub fn rand(n: usize, rng: &mut impl Rng) -> Self {
-        Self(Vec::from_iter(
-            std::iter::from_fn(|| Some(T::random(rng))).take(n),
-        ))
-    }
-
+impl<T> Poly<T> {
     /// Iterate over coefficients, constant term first
-    pub fn iter(&self) -> impl Iterator<Item = &T> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
         self.0.iter()
     }
 
@@ -108,6 +194,23 @@ where
     /// What's the degree of this polynomial?
     pub fn degree(&self) -> usize {
         self.0.len() - 1
+    }
+}
+
+impl<T> Poly<T>
+where
+    T: swanky_field::FiniteRing,
+{
+    /// Create a new polynomial of degree `n - 1`, initialized to the all-zero polynomial
+    pub fn new(n: usize) -> Self {
+        Self(vec![T::ZERO; n])
+    }
+
+    /// Generate a random polynomial over `T` of degree `n - 1`
+    pub fn rand(n: usize, rng: &mut impl Rng) -> Self {
+        Self(Vec::from_iter(
+            std::iter::from_fn(|| Some(T::random(rng))).take(n),
+        ))
     }
 
     /// Get a specific coefficient
@@ -126,35 +229,49 @@ impl<T> IntoIterator for Poly<T> {
     }
 }
 
+impl<'a, T> IntoIterator for &'a Poly<T> {
+    type Item = &'a T;
+
+    type IntoIter = <&'a [T] as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        (&self.0).into_iter()
+    }
+}
+
 /// Allow to define traits that act pointwise (or scalar) over the elements of something iterable
 macro_rules! pointwise(
     ($trt: ident, $fn: ident, $t: ident) => {
-        impl<T> $trt<$t<T>> for $t<T>
+        pointwise!(@impl, $trt, $fn, $t, $t<T>, $trt<T, Output=T>);
+        pointwise!(@impl, $trt, $fn, $t, &$t<T>, for<'a> $trt<&'a T, Output=T>);
+    };
+    (scalar, $trt: ident, $fn: ident, $t: ident) => {
+        impl<T> $trt<&T> for $t<T>
         where
-            T: $trt<T, Output=T>,
+            T: for<'a> $trt<&'a T, Output=T> + Clone,
         {
             type Output = Self;
-            fn $fn(self, other: Self) -> Self {
-                debug_assert!(self.0.len() == other.0.len());
+            fn $fn(self, other: &T) -> Self {
                 Self(
                     self.into_iter()
-                        .zip(other.into_iter())
-                        .map(|(a, b)| $trt::$fn(a, b))
+                        .map(|a| $trt::$fn(a, other))
                         .collect()
                 )
             }
         }
     };
-    (scalar, $trt: ident, $fn: ident, $t: ident) => {
-        impl<T> $trt<T> for $t<T>
+    (@impl, $trt: ident, $fn: ident, $t: ident, $target:ty, $($bound:tt)*) => {
+        impl<T> $trt<$target> for $t<T>
         where
-            T: $trt<T, Output=T> + Clone,
+            T: $($bound)*,
         {
             type Output = Self;
-            fn $fn(self, other: T) -> Self {
+            fn $fn(self, other: $target) -> Self {
+                debug_assert!(self.0.len() == other.0.len());
                 Self(
                     self.into_iter()
-                        .map(|a| $trt::$fn(a, other.clone()))
+                        .zip(other.into_iter())
+                        .map(|(a, b)| $trt::$fn(a, b))
                         .collect()
                 )
             }
@@ -178,4 +295,36 @@ impl<F: PrimeFiniteField> Add<F> for Poly<F> {
 
 /// A polynomial stored in FFT form
 #[derive(Debug, Clone)]
-pub struct FFTPoly(pub(crate) Vec<num_complex::Complex<f128>>);
+pub struct FFTPolyGeneric<T>(pub(crate) Vec<T>);
+pub type FFTPoly = FFTPolyGeneric<Complex<f128>>;
+
+impl<T> IntoIterator for FFTPolyGeneric<T> {
+    type Item = T;
+
+    type IntoIter = <Vec<T> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a FFTPolyGeneric<T> {
+    type Item = &'a T;
+
+    type IntoIter = <&'a [T] as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        (&self.0).into_iter()
+    }
+}
+
+impl<T> FFTPolyGeneric<T> {
+    pub fn new(x: Vec<T>) -> Self {
+        Self(x)
+    }
+}
+
+pointwise!(Mul, mul, FFTPolyGeneric);
+pointwise!(Add, add, FFTPolyGeneric);
+pointwise!(scalar, Mul, mul, FFTPolyGeneric);
+pointwise!(scalar, Add, add, FFTPolyGeneric);

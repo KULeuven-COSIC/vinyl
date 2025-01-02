@@ -344,20 +344,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "swanky-field-f61p"
-version = "0.6.0"
-source = "git+https://github.com/GaloisInc/swanky?rev=v0.6.0#553ede0dc97fa6db06d87db395dad4501f0473b1"
-dependencies = [
- "bytemuck",
- "crypto-bigint",
- "generic-array 1.1.1",
- "rand",
- "subtle",
- "swanky-field",
- "swanky-serialization",
-]
-
-[[package]]
 name = "swanky-serialization"
 version = "0.6.0"
 source = "git+https://github.com/GaloisInc/swanky?rev=v0.6.0#553ede0dc97fa6db06d87db395dad4501f0473b1"
@@ -431,11 +417,9 @@ dependencies = [
  "crypto-bigint",
  "flint-sys",
  "generic-array 1.1.1",
- "num-complex",
  "rand",
  "rand_distr",
  "swanky-field",
- "swanky-field-f61p",
  "swanky-serialization",
  "tfhe-fft",
 ]
