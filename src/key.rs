@@ -7,25 +7,27 @@ use crate::poly::{FFTPoly, Poly};
 
 use swanky_field::{FiniteField, PrimeFiniteField};
 
+type LweKeyEl = u64;
+
 /// An LWE secret key (binary)
 #[derive(Debug)]
 pub struct LWEKey {
     /// The actual key, stored in 64-bit chunks, from LSB to MSB
-    key: Vec<u64>,
+    key: Vec<LweKeyEl>,
 
     #[cfg(debug_assertions)]
     /// If we're running in debug mode, keep track of the LWE dimension for sanity checks
     dim: usize,
 }
 
-// NOTE: this has several hardcoded assumptions about the underlying type (in the vec) being u64
 // TODO: We sometimes assume the modulus fits in a single limb
 impl LWEKey {
     /// Sample a new random binary LWE key
     pub fn new<BoI, BaI>(params: &Params<BoI, BaI>, rng: &mut impl Rng) -> Self {
         // We read slightly more than we really have to
         // but we can ignore the remaining parts where needed
-        let mut key = vec![0; (params.dim_lwe + 63) / 64];
+        let mut key =
+            vec![0; (params.dim_lwe + LweKeyEl::BITS as usize - 1) / LweKeyEl::BITS as usize];
         for x in key.iter_mut() {
             *x = rng.gen();
         }
@@ -42,7 +44,7 @@ impl LWEKey {
         debug_assert!((0..self.dim).contains(&i));
 
         // Entirely little endian, to the bit level
-        ((self.key[i / 64] >> (i % 64)) & 1) as u8
+        ((self.key[i / LweKeyEl::BITS as usize] >> (i % LweKeyEl::BITS as usize)) & 1) as u8
     }
 
     /// Obtain the `i`th component of the key
