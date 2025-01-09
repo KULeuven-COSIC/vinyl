@@ -239,6 +239,25 @@ impl<'a, T> IntoIterator for &'a Poly<T> {
     }
 }
 
+impl<T> std::iter::Sum for Poly<T>
+where
+    T: Add<T, Output = T> + Default + Clone,
+{
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        let mut pkbl = iter.peekable();
+        let Some(first) = pkbl.peek() else {
+            return Self(vec![]);
+        };
+        let mut res = Self(vec![T::default(); first.0.len()]);
+
+        for el in pkbl {
+            res = res + el;
+        }
+
+        res
+    }
+}
+
 /// Allow to define traits that act pointwise (or scalar) over the elements of something iterable
 macro_rules! pointwise(
     ($trt: ident, $fn: ident, $t: ident) => {
@@ -246,19 +265,8 @@ macro_rules! pointwise(
         pointwise!(@impl, $trt, $fn, $t, &$t<T>, for<'a> $trt<&'a T, Output=T>);
     };
     (scalar, $trt: ident, $fn: ident, $t: ident) => {
-        impl<T> $trt<&T> for $t<T>
-        where
-            T: for<'a> $trt<&'a T, Output=T> + Clone,
-        {
-            type Output = Self;
-            fn $fn(self, other: &T) -> Self {
-                Self(
-                    self.into_iter()
-                        .map(|a| $trt::$fn(a, other))
-                        .collect()
-                )
-            }
-        }
+        pointwise!(@impl scalar, $trt, $fn, $t, T, $trt<T, Output=T> + Copy);
+        pointwise!(@impl scalar, $trt, $fn, $t, &T, for<'a> $trt<&'a T, Output=T>);
     };
     (@impl, $trt: ident, $fn: ident, $t: ident, $target:ty, $($bound:tt)*) => {
         impl<T> $trt<$target> for $t<T>
@@ -272,6 +280,21 @@ macro_rules! pointwise(
                     self.into_iter()
                         .zip(other.into_iter())
                         .map(|(a, b)| $trt::$fn(a, b))
+                        .collect()
+                )
+            }
+        }
+    };
+    (@impl scalar, $trt: ident, $fn: ident, $t: ident, $target:ty, $($bound:tt)*) => {
+        impl<T> $trt<$target> for $t<T>
+        where
+            T: $($bound)*
+        {
+            type Output = Self;
+            fn $fn(self, other: $target) -> Self {
+                Self(
+                    self.into_iter()
+                        .map(|a| $trt::$fn(a, other))
                         .collect()
                 )
             }
@@ -321,6 +344,28 @@ impl<'a, T> IntoIterator for &'a FFTPolyGeneric<T> {
 impl<T> FFTPolyGeneric<T> {
     pub fn new(x: Vec<T>) -> Self {
         Self(x)
+    }
+}
+
+impl std::iter::Sum for FFTPoly {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        let mut pkbl = iter.peekable();
+        let Some(first) = pkbl.peek() else {
+            return Self(vec![]);
+        };
+        let mut res = Self(vec![
+            Complex {
+                re: f128(0.0, 0.0),
+                im: f128(0.0, 0.0)
+            };
+            first.0.len()
+        ]);
+
+        for el in pkbl {
+            res = res + el;
+        }
+
+        res
     }
 }
 

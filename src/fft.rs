@@ -3,7 +3,10 @@
 
 // TODO: Consider NTTs instead, or smth? (swanky_field_fft?)
 
-use crate::poly::{Complex, FFTPoly, Poly};
+use crate::{
+    modular::lift_centered,
+    poly::{Complex, FFTPoly, Poly},
+};
 
 use swanky_field::PrimeFiniteField;
 use tfhe_fft::fft128::{f128, Plan};
@@ -21,7 +24,7 @@ pub(crate) struct FFTPlan {
 
 /// Convert a field element into an f128; assuming the element fits in a single limb
 fn field_to_f128<F: PrimeFiniteField>(x: F) -> f128 {
-    let limb = x.into_int::<1>().as_words()[0];
+    let limb = lift_centered(x);
 
     // The most significant part
     let f = limb as f64;
@@ -29,7 +32,7 @@ fn field_to_f128<F: PrimeFiniteField>(x: F) -> f128 {
     // NOTE: not constant time
 
     // approx + e = limb
-    let approx = f as u64;
+    let approx = f as i64;
     let e = if approx >= limb {
         -((approx - limb) as f64)
     } else {
@@ -157,20 +160,15 @@ impl FFTPlan {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::params::TESTTYPE;
+    use crate::test_utils::*;
 
-    use crate::params::{Rng, TESTTYPE};
-
-    use rand::SeedableRng;
     use swanky_field::FiniteRing;
 
     // NOTE: All these tests currently rely on the modulus being small enough that
     // no precision is lost (at all, after rounding)
     const _SMALL_MOD: () =
         assert!(<<TESTTYPE as swanky_field::FiniteField>::NumberOfBitsInBitDecomposition as generic_array::typenum::Unsigned>::U8 <= 32);
-
-    fn rng(seed: Option<u64>) -> impl Rng {
-        rand::rngs::StdRng::seed_from_u64(seed.unwrap_or(1337))
-    }
 
     #[test]
     fn test_field_f128_roundtrip() {
@@ -239,42 +237,6 @@ mod test {
         fft_test_roundtrip_size(1 << crate::params::TESTPARAMS.log_deg_ntru);
     }
 
-    fn slow_negacyclic_mult<F: PrimeFiniteField>(a: &[F], b: &[F]) -> Vec<F> {
-        assert_eq!(a.len(), b.len());
-        let n = a.len();
-
-        let mut full = vec![F::ZERO; 2 * n];
-        for i in 0..n {
-            for j in 0..n {
-                full[i + j] += a[i] * b[j];
-            }
-        }
-
-        let mut res = Vec::with_capacity(n);
-        for i in 0..n {
-            res.push(full[i] - full[i + n]);
-        }
-        res
-    }
-
-    fn slow_negacyclic_mult_f128(a: &[f128], b: &[f128]) -> Vec<f128> {
-        assert_eq!(a.len(), b.len());
-        let n = a.len();
-
-        let mut full = vec![f128(0.0, 0.0); 2 * n];
-        for i in 0..n {
-            for j in 0..n {
-                full[(i + j) % (2 * n)] += a[i] * b[j];
-            }
-        }
-
-        let mut res = Vec::with_capacity(n);
-        for i in 0..n {
-            res.push(full[i] - full[i + n]);
-        }
-        res
-    }
-
     fn fft_test_mult<F: PrimeFiniteField>(n: usize) {
         let rng = &mut rng(None);
         let plan = FFTPlan::new(n);
@@ -283,11 +245,7 @@ mod test {
             let a = Poly::<F>::rand(n, rng);
             let b = Poly::<F>::rand(n, rng);
 
-            let a_f128 = a.0.iter().cloned().map(field_to_f128).collect::<Vec<_>>();
-            let b_f128 = b.0.iter().cloned().map(field_to_f128).collect::<Vec<_>>();
-            let c_f128 = slow_negacyclic_mult_f128(&a_f128, &b_f128);
-
-            let c_expected = Poly(slow_negacyclic_mult(&a.0, &b.0));
+            let c_expected = Poly(slow_negacyclic_mult(&a.0, &b.0, F::ZERO));
 
             let a_fft = plan.fwd(a);
             let b_fft = plan.fwd(b);

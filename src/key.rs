@@ -85,7 +85,7 @@ impl LWEKey {
         }
 
         let message = BaI::conditional_select(&BaI::ZERO, &BaI::ONE, message.into());
-        ct.b += message * int_to_field((BaI::modulus_int::<1>() >> 2).as_limbs()[0])
+        ct.b += message * params.scale_lwe
             + int_to_field(sample_discrete_gaussian(params.err_stdev_lwe, rng).into());
 
         ct
@@ -102,12 +102,9 @@ impl LWEKey {
             .map(|(x, y): (BaI, BaI)| x * y)
             .sum();
 
-        let scale = BaI::modulus_int::<1>() >> 2;
-        let half_scale = int_to_field((BaI::modulus_int::<1>() >> 3).as_limbs()[0]);
-
         // Add scale / 2 and floor div to round
-        let out = (ct.b - mask + half_scale).into_int::<1>()
-            / crypto_bigint::NonZero::new(scale).unwrap();
+        let out = (ct.b - mask + params.half_scale_lwe).into_int::<1>()
+            / crypto_bigint::NonZero::new(params.scale_lwe.into_int::<1>()).unwrap();
         out.bit_vartime(0) as u8
     }
 }
@@ -173,7 +170,7 @@ impl NTRUKey {
             gadget_base_pow *= params.gadget_base;
             res.push(params.fft.fwd(component))
         }
-        NtruVectorCiphertext { vec: res }
+        NtruVectorCiphertext { ct: res }
     }
 }
 
@@ -246,12 +243,7 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-
-    use rand::SeedableRng;
-
-    fn rng(seed: Option<u64>) -> impl Rng {
-        rand::rngs::StdRng::seed_from_u64(seed.unwrap_or(1337))
-    }
+    use crate::test_utils::*;
 
     #[test]
     fn test_lwe_roundtrip() {
