@@ -28,7 +28,7 @@ where
         let mod_to = F2::modulus_int::<1>().as_words()[0] as u128;
         let n = self.into_int::<1>().as_words()[0] as u128;
         int_to_field(crypto_bigint::Limb(
-            randomized_rounding_div(mod_to * n, mod_from)
+            (randomized_rounding_div(mod_to * n, mod_from) % mod_to)
                 .try_into()
                 .expect("Modswitch failed because reduced value does not fit in word somehow"),
         ))
@@ -337,6 +337,16 @@ mod test {
         for _ in 0..100 {
             let x = TESTTYPE::random(rng);
             assert_eq!(x, x.modswitch());
+        }
+    }
+
+    #[test]
+    fn modswitch_eq_modulus() {
+        for _ in 0..100 {
+            let x = M61::ZERO - M61::ONE;
+            let y: M31 = x.clone().modswitch();
+            // we care about the line above not panicking
+            core::hint::black_box(y);
         }
     }
 
