@@ -3,7 +3,7 @@ use std::ops::{Add, Div, Mul, Sub};
 use swanky_field::PrimeFiniteField;
 use tfhe_fft::fft128::f128;
 
-use crate::params::Rng;
+use crate::{modular::ModSwitch, params::Rng};
 
 // TODO? Move somewhere dedicated
 /// Complex numbers, generic over the base type
@@ -373,3 +373,12 @@ pointwise!(Mul, mul, FFTPolyGeneric);
 pointwise!(Add, add, FFTPolyGeneric);
 pointwise!(scalar, Mul, mul, FFTPolyGeneric);
 pointwise!(scalar, Add, add, FFTPolyGeneric);
+
+impl<S, T> ModSwitch<Poly<T>> for Poly<S>
+where
+    S: ModSwitch<T>,
+{
+    fn modswitch(self) -> Poly<T> {
+        Poly(self.0.into_iter().map(ModSwitch::modswitch).collect())
+    }
+}

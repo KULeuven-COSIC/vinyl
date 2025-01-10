@@ -1,10 +1,38 @@
 //! Modular integer types and associated traits
 
 use crate::params::Rng;
+
 /// A type that can be modulo-switched onto `Target`
 /// Functionally similar to [`Into`], but semantically more restricted
 pub trait ModSwitch<Target> {
     fn modswitch(self) -> Target;
+}
+
+fn randomized_rounding_div(a: u128, b: u128) -> u128 {
+    use rand::Rng;
+
+    let q = a / b;
+    let r = a % b;
+    let round = rand::thread_rng().gen_range(0..b);
+    q + (round <= r) as u128
+}
+
+// TODO: the usual, assumes everything fits in a limb
+impl<F1, F2> ModSwitch<F2> for F1
+where
+    F1: swanky_field::PrimeFiniteField,
+    F2: swanky_field::PrimeFiniteField,
+{
+    fn modswitch(self) -> F2 {
+        let mod_from = F1::modulus_int::<1>().as_words()[0] as u128;
+        let mod_to = F2::modulus_int::<1>().as_words()[0] as u128;
+        let n = self.into_int::<1>().as_words()[0] as u128;
+        int_to_field(crypto_bigint::Limb(
+            randomized_rounding_div(mod_to * n, mod_from)
+                .try_into()
+                .expect("Modswitch failed because reduced value does not fit in word somehow"),
+        ))
+    }
 }
 
 const _REQUIRE_64BIT_LIMB: () = assert!(crypto_bigint::Word::BITS == 64);
@@ -292,5 +320,33 @@ pub(crate) fn lift_centered<F: swanky_field::PrimeFiniteField>(val: F) -> i64 {
         lift
     } else {
         lift - modulus
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{params::TESTTYPE, test_utils::*};
+
+    use swanky_field::FiniteRing;
+
+    #[test]
+    fn modswitch_self() {
+        let rng = &mut rng(None);
+
+        for _ in 0..100 {
+            let x = TESTTYPE::random(rng);
+            assert_eq!(x, x.modswitch());
+        }
+    }
+
+    #[test]
+    fn modswitch_field() {
+        let rng = &mut rng(None);
+
+        for _ in 0..100 {
+            let x = TESTTYPE::random(rng);
+            //TODO
+        }
     }
 }
