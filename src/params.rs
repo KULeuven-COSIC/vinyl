@@ -59,10 +59,10 @@ pub static TESTPARAMS: Params<TESTTYPE, TESTTYPE> = Params::new(|| ParamsInner {
     gadget_base: <M31 as crate::modular::Modular>::new_unchecked(1 << 11),
     err_stdev_lwe: 4.39,
     err_stdev_ntru: 4.39,
-    scale_lwe: <M31 as crate::modular::Modular>::new_unchecked(1073741824),
-    half_scale_lwe: <M31 as crate::modular::Modular>::new_unchecked(536870912),
-    scale_ntru: <M31 as crate::modular::Modular>::new_unchecked(1073741824),
-    half_scale_ntru: <M31 as crate::modular::Modular>::new_unchecked(536870912),
+    scale_lwe: <M31 as crate::modular::Modular>::new_unchecked(536870912),
+    half_scale_lwe: <M31 as crate::modular::Modular>::new_unchecked(268435456),
+    scale_ntru: <M31 as crate::modular::Modular>::new_unchecked(536870912),
+    half_scale_ntru: <M31 as crate::modular::Modular>::new_unchecked(268435456),
 
     fft: crate::fft::FFTPlan::new(1 << 10),
 });
@@ -76,10 +76,10 @@ pub static LARGEPARAMS: Params<M61, M61> = Params::new(|| ParamsInner {
     gadget_base: <M61 as crate::modular::Modular>::new_unchecked(16),
     err_stdev_lwe: 12.0,
     err_stdev_ntru: 12.0,
-    scale_lwe: <M61 as crate::modular::Modular>::new_unchecked(1152921504606846976),
-    half_scale_lwe: <M61 as crate::modular::Modular>::new_unchecked(576460752303423488),
-    scale_ntru: <M61 as crate::modular::Modular>::new_unchecked(1152921504606846976),
-    half_scale_ntru: <M61 as crate::modular::Modular>::new_unchecked(576460752303423488),
+    scale_lwe: <M61 as crate::modular::Modular>::new_unchecked(576460752303423488),
+    half_scale_lwe: <M61 as crate::modular::Modular>::new_unchecked(288230376151711744),
+    scale_ntru: <M61 as crate::modular::Modular>::new_unchecked(576460752303423488),
+    half_scale_ntru: <M61 as crate::modular::Modular>::new_unchecked(288230376151711744),
 
     fft: crate::fft::FFTPlan::new(1 << 14),
 });

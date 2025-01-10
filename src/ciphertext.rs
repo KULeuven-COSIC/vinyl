@@ -8,13 +8,13 @@ pub struct LweCiphertext<M> {
     pub(crate) b: M,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct NtruScalarCiphertext<T> {
     pub(crate) ct: Poly<T>,
 }
 
 // TODO: approximate decomposition
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct NtruVectorCiphertext {
     pub(crate) ct: Vec<FFTPoly>,
 }
@@ -117,6 +117,7 @@ impl NtruVectorCiphertext {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::modular::{int_to_field, sample_ternary};
     use crate::params::{TESTPARAMS, TESTTYPE};
     use crate::test_utils::*;
 
@@ -149,16 +150,57 @@ mod test {
             let y = NtruVectorCiphertext::trivial(vector.clone(), params);
 
             let z = x.external_product(&y, params);
-            let via_polys = NtruScalarCiphertext::trivial(
+            let poly_prod = NtruScalarCiphertext::trivial(
                 Poly(slow_negacyclic_mult(&scalar.0, &vector.0, TESTTYPE::ZERO)),
                 params,
             );
-            assert_eq!(z.ct, via_polys.ct);
+            assert_eq!(z.ct, poly_prod.ct);
         }
     }
 
     #[test]
     fn external_product_noisy() {
-        todo!()
+        let rng = &mut rng(None);
+        let params = &TESTPARAMS;
+        let len = 1 << params.log_deg_ntru;
+        let key = crate::key::NTRUKey::new(params, rng);
+
+        for _ in 0..5 {
+            for bit in 0..=1 {
+                // accumulator is a ternary plaintext
+                let mut scalar = Poly::<TESTTYPE>::new(len);
+                scalar.iter_mut().for_each(|x| *x = sample_ternary(rng));
+                let x = NtruScalarCiphertext::trivial(scalar.clone(), params);
+
+                // vector ciphertexts are ternary monomials
+                let mut vector1 = Poly::<TESTTYPE>::new(len);
+                vector1.0[rng.gen_range(0..len)] = sample_ternary(rng);
+                let y = NtruVectorCiphertext::trivial(vector1.clone(), params);
+
+                let mut vector2 = Poly::<TESTTYPE>::new(len);
+                vector2.0[rng.gen_range(0..len)] = sample_ternary(rng);
+                let z = NtruVectorCiphertext::trivial(vector2.clone(), params);
+
+                let mut bit_vec = vec![TESTTYPE::ZERO; len];
+                bit_vec[0] = int_to_field(bit.into());
+                let b = key.enc_bit_vec(bit, params, rng);
+
+                let res = x
+                    .external_product(&y, params)
+                    .external_product(&z, params)
+                    .external_product(&b, params);
+                let dec = key.dec_scalar(res, params);
+                let poly_prod = slow_negacyclic_mult(
+                    &slow_negacyclic_mult(
+                        &slow_negacyclic_mult(&scalar.0, &vector1.0, TESTTYPE::ZERO),
+                        &vector2.0,
+                        TESTTYPE::ZERO,
+                    ),
+                    &bit_vec,
+                    TESTTYPE::ZERO,
+                );
+                assert_eq!(dec, Poly(poly_prod));
+            }
+        }
     }
 }

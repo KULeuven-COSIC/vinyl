@@ -1,7 +1,7 @@
 //! Defining all sorts of cryptographic keys and the operations they can perform
 
-use crate::ciphertext::{LweCiphertext, NtruVectorCiphertext};
-use crate::modular::{bit_to_field, int_to_field, sample_discrete_gaussian};
+use crate::ciphertext::{LweCiphertext, NtruScalarCiphertext, NtruVectorCiphertext};
+use crate::modular::{bit_to_field, int_to_field, sample_discrete_gaussian, sample_ternary};
 use crate::params::{Params, Rng};
 use crate::poly::{FFTPoly, Poly};
 
@@ -112,23 +112,17 @@ impl LWEKey {
 /// An NTRU/NGS key, storing both the original polynomial 4f' + 1,
 /// and its inverse mod X^N + 1
 #[derive(Debug, Clone)]
-struct NTRUKey {
-    #[cfg(debug_assertions)]
+pub struct NTRUKey {
+    #[cfg(test)]
     /// `4*f' + 1`, the polynomial before inversion
     f: FFTPoly,
     /// `f^-1` the actual thing used for encryption in practice
     finv: FFTPoly,
 }
 
-/// Sample a random ternary element, embedded into the modular type M
-fn sample_ternary<F: PrimeFiniteField>(rng: &mut impl Rng) -> F {
-    let r = rng.gen_range(0..3u8).into();
-    int_to_field::<F>(r) - F::ONE
-}
-
 impl NTRUKey {
     /// Generate a fresh NTRU/NGS key of given degree
-    fn new<BoI: PrimeFiniteField, BaI>(params: &Params<BoI, BaI>, rng: &mut impl Rng) -> Self {
+    pub fn new<BoI: PrimeFiniteField, BaI>(params: &Params<BoI, BaI>, rng: &mut impl Rng) -> Self {
         let mut f = Poly::<BoI>::new(1 << params.log_deg_ntru);
         let scale: BoI = int_to_field(4u8.into());
 
@@ -138,7 +132,7 @@ impl NTRUKey {
             f = f + BoI::ONE;
             if let Some(finv) = f.invert() {
                 return Self {
-                    #[cfg(debug_assertions)]
+                    #[cfg(test)]
                     f: params.fft.fwd(f),
                     finv: params.fft.fwd(finv),
                 };
@@ -146,7 +140,7 @@ impl NTRUKey {
         }
     }
 
-    fn enc_bit_vec<BoI: PrimeFiniteField, BaI>(
+    pub fn enc_bit_vec<BoI: PrimeFiniteField, BaI>(
         &self,
         bit: u8,
         params: &Params<BoI, BaI>,
@@ -172,6 +166,36 @@ impl NTRUKey {
         }
         NtruVectorCiphertext { ct: res }
     }
+
+    #[cfg(test)]
+    pub(crate) fn dec_scalar<BoI: PrimeFiniteField, BaI>(
+        &self,
+        ct: NtruScalarCiphertext<BoI>,
+        params: &Params<BoI, BaI>,
+    ) -> Poly<BoI> {
+        // f * (g/f + Δ m) = g + f Δ m = g' + Q/Δ f' Δ  m + Δ m = g' + Δ m
+
+        use crate::modular::lift_centered;
+        let delta_m_plus_noise = params.fft.inv::<BoI>(params.fft.fwd(ct.ct) * &self.f);
+        let modulus = BoI::modulus_int::<1>().as_words()[0] as i64;
+
+        Poly(
+            delta_m_plus_noise
+                .0
+                .into_iter()
+                .map(|coef| {
+                    let mut ccoef = lift_centered(coef);
+                    if ccoef < 0 {
+                        ccoef -= lift_centered(params.half_scale_ntru);
+                    } else {
+                        ccoef += lift_centered(params.half_scale_ntru);
+                    }
+                    let intval = ccoef / lift_centered(params.scale_ntru);
+                    BoI::try_from_int::<1>((((intval + modulus) % modulus) as u64).into()).unwrap()
+                })
+                .collect(),
+        )
+    }
 }
 
 // TODO
@@ -191,7 +215,20 @@ impl<F> KskNtruLwe<F> {
 /// A FINAL bootstrapping key: encryptions of an LWE secret key under the NTRU boot key
 /// ready for use in CMUX gates.
 #[derive(Clone, Debug)]
-struct Bsk();
+struct Bsk(Vec<NtruVectorCiphertext>);
+
+impl Bsk {
+    fn new<BoI: PrimeFiniteField, BaI>(
+        boot_key: &NTRUKey,
+        base_key: &LWEKey,
+        params: &Params<BoI, BaI>,
+        rng: &mut impl Rng,
+    ) -> Self {
+        Self(Vec::from_iter((0..params.dim_lwe).map(|idx| {
+            boot_key.enc_bit_vec(base_key.get_bit(idx), params, rng)
+        })))
+    }
+}
 
 /// A FINAL public key, contains keyswitching and bootstrapping keys
 #[derive(Clone, Debug)]
@@ -222,16 +259,14 @@ where
         let base = LWEKey::new(params, rng);
         let boot = NTRUKey::new(params, rng);
         let ksk = KskNtruLwe::new(&boot.clone(), &base); // Check what kind of modswitching we may need
+        let bsk = Bsk::new(&boot, &base, params, rng);
+
         Key {
             params,
             base,
             #[cfg(debug_assertions)]
             boot,
-            public: PublicKey {
-                params,
-                ksk,
-                bsk: Bsk(),
-            },
+            public: PublicKey { params, ksk, bsk },
         }
     }
 
@@ -242,19 +277,65 @@ where
 
 #[cfg(test)]
 mod test {
+    use swanky_field::FiniteRing;
+
     use super::*;
-    use crate::test_utils::*;
+    use crate::{
+        params::{TESTPARAMS, TESTTYPE},
+        test_utils::*,
+    };
 
     #[test]
-    fn test_lwe_roundtrip() {
+    fn lwe_roundtrip() {
         let rng = &mut rng(None);
-        let params = &crate::params::TESTPARAMS;
+        let params = &TESTPARAMS;
         let key = LWEKey::new(params, rng);
         for _ in 0..100 {
             let ct0 = key.encrypt(0, params, rng);
             assert_eq!(key.decrypt(ct0, params), 0);
             let ct1 = key.encrypt(1, params, rng);
             assert_eq!(key.decrypt(ct1, params), 1);
+        }
+    }
+
+    #[test]
+    fn ntru_decrypt_trivial() {
+        let rng = &mut rng(None);
+        let params = &TESTPARAMS;
+        let len = 1 << params.log_deg_ntru;
+        let key = crate::key::NTRUKey::new(params, rng);
+
+        let mut scalar = Poly::<TESTTYPE>::new(len);
+        scalar.iter_mut().for_each(|x| *x = sample_ternary(rng));
+        let x = NtruScalarCiphertext::trivial(scalar.clone(), params);
+
+        assert_eq!(scalar, key.dec_scalar(x, params));
+    }
+
+    #[test]
+    fn ntru_decrypt_noisy() {
+        let rng = &mut rng(None);
+        let params = &TESTPARAMS;
+        let len = 1 << params.log_deg_ntru;
+
+        // We'll try a few random bit encryptions, but those are vector ciphertexts
+        // so we need this scalar to bring it back into scalar with an external product
+        let zero = Poly::new(len);
+        let one = Poly::new(len) + TESTTYPE::ONE;
+        let acc = NtruScalarCiphertext::trivial(one.clone(), params);
+
+        for _ in 0..5 {
+            let key = NTRUKey::new(params, rng);
+            let ct = key.enc_bit_vec(0, params, rng);
+            assert_eq!(
+                key.dec_scalar(acc.clone().external_product(&ct, params), params),
+                zero
+            );
+            let ct = key.enc_bit_vec(1, params, rng);
+            assert_eq!(
+                key.dec_scalar(acc.clone().external_product(&ct, params), params),
+                one
+            );
         }
     }
 }

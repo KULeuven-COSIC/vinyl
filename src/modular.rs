@@ -258,6 +258,12 @@ pub(crate) fn sample_discrete_gaussian(stdev: f64, rng: &mut impl Rng) -> u64 {
     rng.sample(distr).round() as u64
 }
 
+/// Sample a random ternary element, embedded into the field F
+pub(crate) fn sample_ternary<F: swanky_field::PrimeFiniteField>(rng: &mut impl Rng) -> F {
+    let r = rng.gen_range(0..3u8).into();
+    int_to_field::<F>(r) - F::ONE
+}
+
 /// Lift a bit into the finite field. The bit must be 0 or 1.
 pub(crate) fn bit_to_field<F: swanky_field::FiniteField>(bit: u8) -> F {
     debug_assert!(bit == 0 || bit == 1);
