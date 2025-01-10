@@ -1,6 +1,6 @@
 //! Parameters defining the entire scheme
 
-use crate::modular::{M31, M61};
+use crate::modular::{Z2k, M31, M61};
 
 use std::sync::LazyLock;
 
@@ -10,8 +10,8 @@ impl<T: rand::Rng + rand::CryptoRng> Rng for T {}
 
 /// Parameters that define the size, security and efficiency of the entire FINAL FHE scheme
 #[derive(Debug)]
-pub struct ParamsInner<BootInt, BaseInt> {
-    _tp: std::marker::PhantomData<(BootInt, BaseInt)>,
+pub struct ParamsInner<BootInt, BaseInt, ExpRing> {
+    _tp: std::marker::PhantomData<ExpRing>,
     /// The LWE dimension, for binary LWE secrets
     pub(crate) dim_lwe: usize,
     /// log2(N) where the NTRU ciphertext are defined over mod X^N + 1
@@ -50,7 +50,7 @@ pub struct ParamsInner<BootInt, BaseInt> {
 }
 
 /// Parameters that define the size, security and efficiency of the entire FINAL FHE scheme
-pub type Params<BootInt, BaseInt> = LazyLock<ParamsInner<BootInt, BaseInt>>;
+pub type Params<BootInt, BaseInt, ExpRing> = LazyLock<ParamsInner<BootInt, BaseInt, ExpRing>>;
 
 #[cfg(test)]
 pub(crate) type TESTTYPE = M31;
@@ -58,7 +58,7 @@ pub(crate) type TESTTYPE = M31;
 // TODO: check!
 /// Some parameters to test the scheme with during development
 #[cfg(test)]
-pub static TESTPARAMS: Params<TESTTYPE, TESTTYPE> = Params::new(|| ParamsInner {
+pub static TESTPARAMS: Params<TESTTYPE, TESTTYPE, Z2k<12>> = Params::new(|| ParamsInner {
     _tp: std::marker::PhantomData,
     dim_lwe: 930,
     log_deg_ntru: 10,
@@ -78,7 +78,7 @@ pub static TESTPARAMS: Params<TESTTYPE, TESTTYPE> = Params::new(|| ParamsInner {
 });
 
 // TODO: check, this is entirely random garbage
-pub static LARGEPARAMS: Params<M61, M61> = Params::new(|| ParamsInner {
+pub static LARGEPARAMS: Params<M61, M61, Z2k<16>> = Params::new(|| ParamsInner {
     _tp: std::marker::PhantomData,
     dim_lwe: 2048,
     log_deg_ntru: 14,

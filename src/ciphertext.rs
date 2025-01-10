@@ -1,11 +1,27 @@
 use swanky_field::PrimeFiniteField;
 
-use crate::poly::{FFTPoly, Poly};
+use crate::{
+    modular::ModSwitch,
+    poly::{FFTPoly, Poly},
+};
 
 #[derive(Clone, Debug)]
-pub struct LweCiphertext<M> {
-    pub(crate) a: Vec<M>,
-    pub(crate) b: M,
+pub struct LweCiphertext<F> {
+    pub(crate) a: Vec<F>,
+    pub(crate) b: F,
+}
+
+impl<F, T> ModSwitch<LweCiphertext<T>> for LweCiphertext<F>
+where
+    F: ModSwitch<T>,
+{
+    fn modswitch(self) -> LweCiphertext<T> {
+        LweCiphertext {
+            // Via Poly because we can't impl it for Vec easily
+            a: Poly(self.a).modswitch().0,
+            b: self.b.modswitch(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -58,10 +74,10 @@ impl<T: swanky_field::PrimeFiniteField> NtruScalarCiphertext<T> {
     /// Not implemented as a Mul trait for two reasons:
     /// - We need access to the params
     /// - This is costly, so explicit is better than implicit here
-    pub(crate) fn external_product<BaI>(
+    pub(crate) fn external_product<BaI, ER>(
         self,
         rhs: &NtruVectorCiphertext,
-        params: &crate::params::Params<T, BaI>,
+        params: &crate::params::Params<T, BaI, ER>,
     ) -> Self {
         Self {
             ct: params.fft.inv(
@@ -81,13 +97,19 @@ impl<T: swanky_field::PrimeFiniteField + for<'a> std::ops::Mul<&'a T, Output = T
     #[cfg(test)]
     /// Construct a trivial ciphertext embedding `pt`, with no noise;
     /// using the "normal" scale $\Delta = Q/4$
-    pub(crate) fn trivial<BaI>(pt: Poly<T>, params: &crate::params::Params<T, BaI>) -> Self {
+    pub(crate) fn trivial<BaI, ER>(
+        pt: Poly<T>,
+        params: &crate::params::Params<T, BaI, ER>,
+    ) -> Self {
         Self::trivial_scale(pt, &params.scale_ntru)
     }
 
     /// Construct a trivial ciphertext embedding `pt`, with no noise;
     /// using the "halved" scale $\Delta = Q/8$ as used for the test vector
-    pub(crate) fn trivial_half<BaI>(pt: Poly<T>, params: &crate::params::Params<T, BaI>) -> Self {
+    pub(crate) fn trivial_half<BaI, ER>(
+        pt: Poly<T>,
+        params: &crate::params::Params<T, BaI, ER>,
+    ) -> Self {
         Self::trivial_scale(pt, &params.half_scale_ntru)
     }
 
@@ -99,9 +121,9 @@ impl<T: swanky_field::PrimeFiniteField + for<'a> std::ops::Mul<&'a T, Output = T
 }
 
 impl NtruVectorCiphertext {
-    pub(crate) fn trivial<T: PrimeFiniteField, BaI>(
+    pub(crate) fn trivial<T: PrimeFiniteField, BaI, ER>(
         m: Poly<T>,
-        params: &crate::params::Params<T, BaI>,
+        params: &crate::params::Params<T, BaI, ER>,
     ) -> Self {
         let mut ct = Vec::with_capacity(params.dim_ngs);
 
@@ -112,6 +134,23 @@ impl NtruVectorCiphertext {
         }
 
         Self { ct }
+    }
+
+    pub(crate) fn monomial<T: PrimeFiniteField, BaI, ER>(
+        exponent: usize,
+        params: &crate::params::Params<T, BaI, ER>,
+    ) -> Self {
+        #[allow(non_snake_case)]
+        let N = 1 << params.log_deg_ntru;
+        let mut poly = Poly::new(N);
+        let exponent = exponent % (2 * N);
+        let (exponent, value) = if exponent >= N {
+            (exponent - N, -T::ONE)
+        } else {
+            (exponent, T::ONE)
+        };
+        poly.0[exponent] = value;
+        Self::trivial(poly, params)
     }
 }
 

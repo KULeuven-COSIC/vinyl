@@ -1,7 +1,9 @@
 //! Defining all sorts of cryptographic keys and the operations they can perform
 
 use crate::ciphertext::{LweCiphertext, NtruScalarCiphertext, NtruVectorCiphertext};
-use crate::modular::{bit_to_field, int_to_field, sample_discrete_gaussian, sample_ternary};
+use crate::modular::{
+    bit_to_field, int_to_field, sample_discrete_gaussian, sample_ternary, ModSwitch, Modular,
+};
 use crate::params::{Params, Rng};
 use crate::poly::{FFTPoly, Poly};
 
@@ -82,10 +84,10 @@ impl LWEKey {
     }
 
     /// Encrypt a message
-    pub fn encrypt<BoI, BaI>(
+    pub fn encrypt<BoI, BaI, ER>(
         &self,
         message: u8,
-        params: &Params<BoI, BaI>,
+        params: &Params<BoI, BaI, ER>,
         rng: &mut impl Rng,
     ) -> LweCiphertext<BaI>
     where
@@ -124,7 +126,7 @@ impl LWEKey {
     }
 
     /// Decrypt a ciphertext
-    pub fn decrypt<BaI, BoI>(&self, ct: LweCiphertext<BaI>, params: &Params<BoI, BaI>) -> u8
+    pub fn decrypt<BoI, BaI, ER>(&self, ct: LweCiphertext<BaI>, params: &Params<BoI, BaI, ER>) -> u8
     where
         BaI: PrimeFiniteField + for<'a> std::ops::Add<&'a BaI, Output = BaI>,
     {
@@ -151,8 +153,8 @@ pub struct NTRUKey {
 impl NTRUKey {
     /// Generate a fresh NTRU/NGS key of given degree
     /// Also returns the coefficient vector that can be used to generate a NTRU->LWE KSK
-    pub fn new<BoI: PrimeFiniteField, BaI>(
-        params: &Params<BoI, BaI>,
+    pub fn new<BoI: PrimeFiniteField, BaI, ER>(
+        params: &Params<BoI, BaI, ER>,
         rng: &mut impl Rng,
     ) -> (Self, Poly<BoI>) {
         let mut f = Poly::<BoI>::new(1 << params.log_deg_ntru);
@@ -175,10 +177,10 @@ impl NTRUKey {
         }
     }
 
-    pub fn enc_bit_vec<BoI: PrimeFiniteField, BaI>(
+    pub fn enc_bit_vec<BoI: PrimeFiniteField, BaI, ER>(
         &self,
         bit: u8,
-        params: &Params<BoI, BaI>,
+        params: &Params<BoI, BaI, ER>,
         rng: &mut impl Rng,
     ) -> NtruVectorCiphertext {
         let mut res = Vec::with_capacity(params.dim_ngs);
@@ -203,10 +205,10 @@ impl NTRUKey {
     }
 
     #[cfg(test)]
-    pub(crate) fn dec_scalar<BoI: PrimeFiniteField, BaI>(
+    pub(crate) fn dec_scalar<BoI: PrimeFiniteField, BaI, ER>(
         &self,
         ct: NtruScalarCiphertext<BoI>,
-        params: &Params<BoI, BaI>,
+        params: &Params<BoI, BaI, ER>,
     ) -> Poly<BoI> {
         // f * (g/f + Δ m) = g + f Δ m = g' + Q/Δ f' Δ  m + Δ m = g' + Δ m
 
@@ -242,7 +244,12 @@ struct KskNtruLwe<F>(Vec<Vec<LweCiphertext<F>>>);
 impl<F: PrimeFiniteField> KskNtruLwe<F> {
     /// Build a KSK that transfers from ciphertext under the ntru key
     /// to ciphertexts under the lwe key
-    fn new<BaI>(ntru: &Poly<F>, lwe: &LWEKey, params: &Params<F, BaI>, rng: &mut impl Rng) -> Self {
+    fn new<BaI, ER>(
+        ntru: &Poly<F>,
+        lwe: &LWEKey,
+        params: &Params<F, BaI, ER>,
+        rng: &mut impl Rng,
+    ) -> Self {
         let mut res = Vec::with_capacity(params.ksk_ntru_lwe_dim);
         let mut base = F::ONE;
         for _ in 0..params.ksk_ntru_lwe_dim {
@@ -259,10 +266,10 @@ impl<F: PrimeFiniteField> KskNtruLwe<F> {
         Self(res)
     }
 
-    pub fn key_switch<BaI>(
+    pub fn key_switch<BaI, ER>(
         &self,
         ct: NtruScalarCiphertext<F>,
-        params: &Params<F, BaI>,
+        params: &Params<F, BaI, ER>,
     ) -> LweCiphertext<F> {
         let decomp = ct.gadget_decomp(params.ksk_ntru_lwe_dim, params.ksk_ntru_lwe_base);
         // Ugly roundtrip through Poly so that we get vectorial addition for free
@@ -290,44 +297,88 @@ impl<F: PrimeFiniteField> KskNtruLwe<F> {
 struct Bsk(Vec<NtruVectorCiphertext>);
 
 impl Bsk {
-    fn new<BoI: PrimeFiniteField, BaI>(
+    fn new<BoI: PrimeFiniteField, BaI, ER>(
         boot_key: &NTRUKey,
         base_key: &LWEKey,
-        params: &Params<BoI, BaI>,
+        params: &Params<BoI, BaI, ER>,
         rng: &mut impl Rng,
     ) -> Self {
         Self(Vec::from_iter((0..params.dim_lwe).map(|idx| {
             boot_key.enc_bit_vec(base_key.get_bit(idx), params, rng)
         })))
     }
+
+    fn cmux<BoI, BaI, ER>(
+        &self,
+        i: usize,
+        a: ER,
+        params: &crate::params::Params<BoI, BaI, ER>,
+    ) -> NtruVectorCiphertext {
+        todo!()
+    }
 }
 
 /// A FINAL public key, contains keyswitching and bootstrapping keys
 #[derive(Clone, Debug)]
-pub struct PublicKey<'a, BootInt, BaseInt> {
-    params: &'a Params<BootInt, BaseInt>,
+pub struct PublicKey<'a, BootInt, BaseInt, ER> {
+    params: &'a Params<BootInt, BaseInt, ER>,
     ksk: KskNtruLwe<BootInt>,
     bsk: Bsk,
 }
 
+impl<'a, BoI, BaI, ER> PublicKey<'a, BoI, BaI, ER>
+where
+    BaI: ModSwitch<ER>,
+    BoI: ModSwitch<BaI> + PrimeFiniteField + for<'b> std::ops::Mul<&'b BoI, Output = BoI>,
+    ER: Modular,
+    ER::Single: Into<usize>,
+{
+    pub fn bootstrap(
+        &self,
+        ct: LweCiphertext<BaI>,
+        params: &Params<BoI, BaI, ER>,
+    ) -> LweCiphertext<BaI> {
+        let ct_er = ct.modswitch();
+        let mut test_vector = Poly::new(1 << params.log_deg_ntru);
+        test_vector.0.iter_mut().for_each(|x| *x = BoI::ONE);
+        let mut acc = NtruScalarCiphertext::trivial_half(test_vector, params).external_product(
+            &NtruVectorCiphertext::monomial(
+                ct_er.b.extract().into() + (1 << (params.log_deg_ntru - 1)),
+                params,
+            ),
+            params,
+        );
+
+        for (i, a) in ct_er.a.into_iter().enumerate() {
+            acc = acc.external_product(&self.bsk.cmux(i, a, params), params);
+        }
+
+        // TODO: add Q/8 * sum_i X^i
+        todo!();
+
+        let acc_lwe = self.ksk.key_switch(acc, params);
+        acc_lwe.modswitch()
+    }
+}
+
 /// A full FINAL key, including all private key material
 #[derive(Debug)]
-pub struct Key<'a, BootInt, BaseInt> {
-    params: &'a Params<BootInt, BaseInt>,
+pub struct Key<'a, BootInt, BaseInt, ER> {
+    params: &'a Params<BootInt, BaseInt, ER>,
     base: LWEKey,
     #[cfg(debug_assertions)]
     /// The key used for the NGS things, decryption isn't needed during regular execution
     /// but to debug could be useful
     boot: NTRUKey,
-    public: PublicKey<'a, BootInt, BaseInt>,
+    public: PublicKey<'a, BootInt, BaseInt, ER>,
 }
 
-impl<'a, BoI, BaI> Key<'a, BoI, BaI>
+impl<'a, BoI, BaI, ER> Key<'a, BoI, BaI, ER>
 where
     BoI: PrimeFiniteField,
     BaI: PrimeFiniteField,
 {
-    pub fn new(params: &'a Params<BoI, BaI>, rng: &mut impl Rng) -> Self {
+    pub fn new(params: &'a Params<BoI, BaI, ER>, rng: &mut impl Rng) -> Self {
         let base = LWEKey::new(params.dim_lwe, rng);
         let (boot, boot_coefs) = NTRUKey::new(params, rng);
         let ksk = KskNtruLwe::new(&boot_coefs, &base, params, rng);
@@ -342,7 +393,7 @@ where
         }
     }
 
-    pub fn export(&self) -> &PublicKey<BoI, BaI> {
+    pub fn export(&self) -> &PublicKey<BoI, BaI, ER> {
         &self.public
     }
 }

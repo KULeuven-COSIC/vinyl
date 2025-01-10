@@ -20,18 +20,26 @@ fn randomized_rounding_div(a: u128, b: u128) -> u128 {
 // TODO: the usual, assumes everything fits in a limb
 impl<F1, F2> ModSwitch<F2> for F1
 where
-    F1: swanky_field::PrimeFiniteField,
-    F2: swanky_field::PrimeFiniteField,
+    // A lot of these bounds are because annoyance from ModReduce :/
+    F1: Modular,
+    F1::Single: Into<u128>,
+    F2: Modular + ModReduce,
+    F2::Double: From<F2::Single> + std::ops::Rem<Output = F2::Double>,
+    F2::Single: TryFrom<F2::Double>,
+    <F2::Single as TryFrom<F2::Double>>::Error: std::fmt::Debug,
+    F2::Single: Into<u128>,
+    F2::Double: TryFrom<u128>,
+    <F2::Double as TryFrom<u128>>::Error: std::fmt::Debug,
 {
     fn modswitch(self) -> F2 {
-        let mod_from = F1::modulus_int::<1>().as_words()[0] as u128;
-        let mod_to = F2::modulus_int::<1>().as_words()[0] as u128;
-        let n = self.into_int::<1>().as_words()[0] as u128;
-        int_to_field(crypto_bigint::Limb(
-            (randomized_rounding_div(mod_to * n, mod_from) % mod_to)
+        let mod_from = F1::MOD.into();
+        let mod_to = F2::MOD.into();
+        let n = self.extract().into();
+        F2::reduce(
+            randomized_rounding_div(mod_to * n, mod_from)
                 .try_into()
-                .expect("Modswitch failed because reduced value does not fit in word somehow"),
-        ))
+                .expect("u128 doesn't fit in Modular::Double after modswitch"),
+        )
     }
 }
 
@@ -46,12 +54,17 @@ pub(crate) trait Modular {
 
     const MOD: Self::Single;
 
+    /// Create a new object, assuming it's smaller than the modulus
     fn new_unchecked(x: Self::Single) -> Self;
+
+    /// Get the underlying value
+    fn extract(&self) -> Self::Single;
 }
 
 pub(crate) trait ModReduce
 where
     Self: Modular + Sized,
+    // Ideally, the next bounds would only be there for the default implementation of `reduce`
     Self::Double: From<Self::Single> + std::ops::Rem<Output = Self::Double>,
     Self::Single: TryFrom<Self::Double>,
     <Self::Single as TryFrom<Self::Double>>::Error: std::fmt::Debug,
@@ -92,6 +105,11 @@ pub(crate) mod smallfields {
                     #[inline]
                     fn new_unchecked(x: Self::Single) -> Self {
                         Self(x)
+                    }
+
+                    #[inline]
+                    fn extract(&self) -> Self::Single {
+                        self.0
                     }
                 }
 
@@ -276,6 +294,33 @@ impl ModReduce for M61 {
     }
 }
 smallfields::small_field!(@custom_reduce, m61::M61, u64, u128, (1 << 61) - 1, 37);
+
+pub struct Z2k<const K: usize>(u32);
+
+impl<const K: usize> Z2k<K> {
+    const _K_FITS: () = assert!(K < 32);
+    pub const MASK: u32 = (1 << K) - 1;
+}
+
+impl<const K: usize> Modular for Z2k<K> {
+    type Single = u32;
+    type Double = u64;
+    const MOD: u32 = 1 << K;
+
+    fn new_unchecked(x: Self::Single) -> Self {
+        Self(x)
+    }
+
+    fn extract(&self) -> u32 {
+        self.0
+    }
+}
+
+impl<const K: usize> ModReduce for Z2k<K> {
+    fn reduce(val: Self::Double) -> Self {
+        Self::new_unchecked((val & Self::MASK as u64) as u32)
+    }
+}
 
 /// Sample an element from the discrete Gaussian distribution
 /// centered around zero, with given standard deviation.
