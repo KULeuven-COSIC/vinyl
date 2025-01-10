@@ -42,34 +42,32 @@ fn field_to_f128<F: PrimeFiniteField>(x: F) -> f128 {
     f128(f, e)
 }
 
+/// Convert an f64 into a field element, used as part of the f128 conversion
+fn f64_to_field<F: PrimeFiniteField>(x: f64, modulus: u64) -> F {
+    // This gets kinda annoying with negatives potentially not fitting in an i64, but only u64
+    // Hence we first do the rounding in f64s, which should be fine (since close to 0 rounds clearly)
+    // We also once again introduce assumptions on limb size by using u128
+    F::try_from_int::<1>(
+        if x >= 0f64 {
+            (x as u128 % modulus as u128) as u64
+        } else {
+            // Needs an extra mod when x0 = modulus
+            // TODO: improve?
+            (modulus - ((-x) as u128 % modulus as u128) as u64) % modulus
+        }
+        .into(),
+    )
+    .expect("Modular reduction gone wrong in f64_to_field")
+}
+
 /// Convert an f128 back into a field element; assuming the field modulus fits in a single limb
 fn f128_to_field<F: PrimeFiniteField>(x: f128) -> F {
     // not ct, and ugly, but good enough
 
     let modulus = F::modulus_int::<1>().as_words()[0];
-    // This gets kinda annoying with negatives potentially not fitting in an i64, but only u64
-    // Hence we first do the rounding in f64s, which should be fine (since close to 0 rounds clearly)
-    // We also once again introduce assumptions on limb size by using u128
     let x0 = x.0.round();
-    let val = F::try_from_int::<1>(
-        if x0 >= 0f64 {
-            (x0 as u128 % modulus as u128) as u64
-        } else {
-            modulus - ((-x0) as u128 % modulus as u128) as u64
-        }
-        .into(),
-    )
-    .unwrap();
     let x1 = x.1.round();
-    val + F::try_from_int::<1>(
-        if x1 >= 0.0 {
-            (x1 as u128 % modulus as u128) as u64
-        } else {
-            modulus - (-x1 as u128 % modulus as u128) as u64
-        }
-        .into(),
-    )
-    .unwrap()
+    f64_to_field::<F>(x0, modulus) + f64_to_field(x1, modulus)
 }
 
 impl FFTPlan {
@@ -171,7 +169,7 @@ mod test {
         assert!(<<TESTTYPE as swanky_field::FiniteField>::NumberOfBitsInBitDecomposition as generic_array::typenum::Unsigned>::U8 <= 32);
 
     #[test]
-    fn test_field_f128_roundtrip() {
+    fn field_f128_roundtrip() {
         let rng = &mut rng(None);
         for _ in 0..100 {
             let x = TESTTYPE::random(rng);
@@ -180,7 +178,7 @@ mod test {
     }
 
     #[test]
-    fn test_field_f128_mul_roundtrip() {
+    fn field_f128_mul_roundtrip() {
         let rng = &mut rng(None);
         for _ in 0..100 {
             let x = TESTTYPE::random(rng);
@@ -191,7 +189,7 @@ mod test {
     }
 
     #[test]
-    fn test_field_f128_sub_roundtrip() {
+    fn field_f128_sub_roundtrip() {
         let rng = &mut rng(None);
         for _ in 0..100 {
             let x = TESTTYPE::random(rng);
@@ -202,7 +200,7 @@ mod test {
     }
 
     #[test]
-    fn test_field_f128_mul_sub_roundtrip() {
+    fn field_f128_mul_sub_roundtrip() {
         let rng = &mut rng(None);
         for _ in 0..100 {
             let x = TESTTYPE::random(rng);
@@ -214,6 +212,15 @@ mod test {
             );
             assert_eq!(a * b - x * y, z);
         }
+    }
+
+    #[test]
+    fn f128_to_field_negative_modulus() {
+        let modulus = TESTTYPE::modulus_int::<1>().as_words()[0];
+        let f = f128(-(modulus as f64), 0.0);
+        assert_eq!(f128_to_field::<TESTTYPE>(f), TESTTYPE::ZERO);
+        let f = f128(0.0, -(modulus as f64));
+        assert_eq!(f128_to_field::<TESTTYPE>(f), TESTTYPE::ZERO);
     }
 
     fn fft_test_roundtrip_size(n: usize) {
