@@ -2,7 +2,7 @@ use swanky_field::PrimeFiniteField;
 
 use crate::poly::{FFTPoly, Poly};
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LweCiphertext<M> {
     pub(crate) a: Vec<M>,
     pub(crate) b: M,
@@ -23,8 +23,8 @@ impl<T: swanky_field::PrimeFiniteField> NtruScalarCiphertext<T> {
     // TODO: again assumes everything fits into a single limb
     /// Gadget decomposition into `n` parts. Returns an a vec such that
     /// `sum(result[i] * B^i) = self`
-    fn gadget_decomp<BaI>(self, params: &crate::params::Params<T, BaI>) -> Vec<FFTPoly> {
-        let mut res = Vec::with_capacity(params.dim_ngs);
+    pub(crate) fn gadget_decomp(self, dim: usize, base: T) -> Vec<Poly<T>> {
+        let mut res = Vec::with_capacity(dim);
         let mut as_ints: Vec<_> = self
             .ct
             .0
@@ -32,13 +32,13 @@ impl<T: swanky_field::PrimeFiniteField> NtruScalarCiphertext<T> {
             .map(|x| x.into_int::<1>().as_words()[0])
             .collect();
 
-        let base_int = params.gadget_base.into_int::<1>().as_words()[0];
+        let base_int = base.into_int::<1>().as_words()[0];
         debug_assert_eq!(base_int.count_ones(), 1);
-        debug_assert!(base_int.pow(params.dim_ngs as u32) > T::modulus_int::<1>().as_words()[0]);
+        debug_assert!(base_int.pow(dim as u32) > T::modulus_int::<1>().as_words()[0]);
         let base_mask = base_int - 1;
         let base_shift = base_int.ilog2();
 
-        for _ in 0..params.dim_ngs {
+        for _ in 0..dim {
             let mut part = Vec::<T>::with_capacity(as_ints.len());
 
             for coeff in as_ints.iter_mut() {
@@ -49,7 +49,7 @@ impl<T: swanky_field::PrimeFiniteField> NtruScalarCiphertext<T> {
                 *coeff >>= base_shift;
             }
 
-            res.push(params.fft.fwd(Poly(part)))
+            res.push(Poly(part))
         }
         res
     }
@@ -64,12 +64,13 @@ impl<T: swanky_field::PrimeFiniteField> NtruScalarCiphertext<T> {
         params: &crate::params::Params<T, BaI>,
     ) -> Self {
         Self {
-            ct: self
-                .gadget_decomp(params)
-                .into_iter()
-                .zip(rhs.ct.iter())
-                .map(|(x, y)| params.fft.inv(x * y))
-                .sum(),
+            ct: params.fft.inv(
+                self.gadget_decomp(params.dim_ngs, params.gadget_base)
+                    .into_iter()
+                    .zip(rhs.ct.iter())
+                    .map(|(x, y)| params.fft.fwd(x) * y)
+                    .sum(),
+            ),
         }
     }
 }
@@ -128,11 +129,12 @@ mod test {
     fn gadget_decomp_consistency() {
         let rng = &mut rng(None);
         let poly = Poly::<TESTTYPE>::rand(1 << TESTPARAMS.log_deg_ntru, rng);
-        let decomp = NtruScalarCiphertext { ct: poly.clone() }.gadget_decomp(&TESTPARAMS);
+        let decomp = NtruScalarCiphertext { ct: poly.clone() }
+            .gadget_decomp(TESTPARAMS.dim_ngs, TESTPARAMS.gadget_base);
         let sum = decomp
             .into_iter()
             .enumerate()
-            .map(|(i, x)| TESTPARAMS.fft.inv(x) * TESTPARAMS.gadget_base.pow_var_time(i as u128))
+            .map(|(i, x)| x * TESTPARAMS.gadget_base.pow_var_time(i as u128))
             .sum::<Poly<_>>();
         assert_eq!(poly, sum);
     }
@@ -163,7 +165,7 @@ mod test {
         let rng = &mut rng(None);
         let params = &TESTPARAMS;
         let len = 1 << params.log_deg_ntru;
-        let key = crate::key::NTRUKey::new(params, rng);
+        let (key, _) = crate::key::NTRUKey::new(params, rng);
 
         for _ in 0..5 {
             for bit in 0..=1 {

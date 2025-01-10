@@ -275,7 +275,7 @@ macro_rules! pointwise(
         {
             type Output = Self;
             fn $fn(self, other: $target) -> Self {
-                debug_assert!(self.0.len() == other.0.len());
+                debug_assert_eq!(self.0.len(), other.0.len());
                 Self(
                     self.into_iter()
                         .zip(other.into_iter())
