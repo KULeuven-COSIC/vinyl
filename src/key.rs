@@ -308,13 +308,29 @@ impl Bsk {
         })))
     }
 
-    fn cmux<BoI, BaI, ER>(
+    /// Compute `acc` * CMUX_`i`(`a`) = `acc` * VEnc(1 + (X^(`a`) - 1) * bsk_`i`)
+    fn ext_prod_cmux<BoI, BaI, ER>(
         &self,
+        acc: NtruScalarCiphertext<BoI>,
         i: usize,
         a: ER,
         params: &crate::params::Params<BoI, BaI, ER>,
-    ) -> NtruVectorCiphertext {
-        todo!()
+    ) -> NtruScalarCiphertext<BoI>
+    where
+        BoI: PrimeFiniteField,
+        ER: Modular,
+        ER::Single: TryInto<usize>,
+        <ER::Single as TryInto<usize>>::Error: std::fmt::Debug,
+    {
+        // acc * (1 + (X^a - 1) * bsk) = acc + (acc * X^a - acc) * bsk
+        // = acc + (rot(acc, a) - acc) * bsk
+        let orig = acc.clone();
+        (acc.rot(
+            a.extract()
+                .try_into()
+                .expect("coefficient doesn't fit usize"),
+        ) - orig)
+            .external_product(&self.0[i], params)
     }
 }
 
@@ -331,7 +347,8 @@ where
     BaI: ModSwitch<ER>,
     BoI: ModSwitch<BaI> + PrimeFiniteField + for<'b> std::ops::Mul<&'b BoI, Output = BoI>,
     ER: Modular,
-    ER::Single: Into<usize>,
+    ER::Single: TryInto<usize>,
+    <ER::Single as TryInto<usize>>::Error: std::fmt::Debug,
 {
     pub fn bootstrap(
         &self,
@@ -343,18 +360,25 @@ where
         test_vector.0.iter_mut().for_each(|x| *x = BoI::ONE);
         let mut acc = NtruScalarCiphertext::trivial_half(test_vector, params).external_product(
             &NtruVectorCiphertext::monomial(
-                ct_er.b.extract().into() + (1 << (params.log_deg_ntru - 1)),
+                ct_er
+                    .b
+                    .extract()
+                    .try_into()
+                    .expect("Weird platform bit sizes??")
+                    + (1 << (params.log_deg_ntru - 1)),
                 params,
             ),
             params,
         );
 
         for (i, a) in ct_er.a.into_iter().enumerate() {
-            acc = acc.external_product(&self.bsk.cmux(i, a, params), params);
+            acc = self.bsk.ext_prod_cmux(acc, i, a, params);
         }
 
-        // TODO: add Q/8 * sum_i X^i
-        todo!();
+        // add Q/8 * sum_i X^i
+        acc.ct
+            .iter_mut()
+            .for_each(|x| *x = *x + params.half_scale_ntru);
 
         let acc_lwe = self.ksk.key_switch(acc, params);
         acc_lwe.modswitch()
@@ -487,6 +511,25 @@ mod test {
                 &params.scale_ntru,
             );
             assert_eq!(plain.0[0], int_to_field(dec.into()));
+        }
+    }
+
+    #[test]
+    fn bootstrap() {
+        let rng = &mut rng(None);
+        let params = &TESTPARAMS;
+        let key = Key::new(&params, rng);
+        let evk = key.export();
+
+        for _ in 0..10 {
+            for b in 0..=1 {
+                let ct = key.base.encrypt(b, params, rng);
+                let ct1 = evk.bootstrap(ct.clone(), params);
+                let ct2 = evk.bootstrap(ct1.clone(), params);
+                assert_eq!(key.base.decrypt(ct, params), b);
+                assert_eq!(key.base.decrypt(ct1, params), b);
+                assert_eq!(key.base.decrypt(ct2, params), b);
+            }
         }
     }
 }

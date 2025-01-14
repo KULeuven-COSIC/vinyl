@@ -46,7 +46,7 @@ where
 const _REQUIRE_64BIT_LIMB: () = assert!(crypto_bigint::Word::BITS == 64);
 
 /// A type that has a modulus
-pub(crate) trait Modular {
+pub trait Modular {
     /// The type needed to represent a fully reduced number
     type Single;
     /// Type type needed to represent the product of two fully reduced numbers

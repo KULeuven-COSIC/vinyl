@@ -89,6 +89,26 @@ impl<T: swanky_field::PrimeFiniteField> NtruScalarCiphertext<T> {
             ),
         }
     }
+
+    /// Rotate self by `n` places, negacyclically
+    pub(crate) fn rot(self, n: usize) -> Self {
+        let len = self.ct.0.len();
+        let mut n = n % (2 * len);
+        // TODO: not constant time
+        let sign = if n >= len {
+            n -= len;
+            -T::ONE
+        } else {
+            T::ONE
+        };
+        let mut res = Poly::new(self.ct.0.len());
+
+        for i in 0..len {
+            res.0[(i + n) % len] = sign * self.ct.0[i];
+        }
+
+        Self { ct: res }
+    }
 }
 
 impl<T: swanky_field::PrimeFiniteField + for<'a> std::ops::Mul<&'a T, Output = T>>
@@ -117,6 +137,16 @@ impl<T: swanky_field::PrimeFiniteField + for<'a> std::ops::Mul<&'a T, Output = T
     /// using the provided scale $\Delta$
     fn trivial_scale(pt: Poly<T>, scale: &T) -> Self {
         Self { ct: pt * scale }
+    }
+}
+
+impl<T: PrimeFiniteField> std::ops::Sub<NtruScalarCiphertext<T>> for NtruScalarCiphertext<T> {
+    type Output = Self;
+
+    fn sub(self, rhs: NtruScalarCiphertext<T>) -> Self::Output {
+        Self {
+            ct: self.ct - rhs.ct,
+        }
     }
 }
 
