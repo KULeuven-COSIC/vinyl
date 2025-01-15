@@ -325,12 +325,13 @@ impl Bsk {
         // acc * (1 + (X^a - 1) * bsk) = acc + (acc * X^a - acc) * bsk
         // = acc + (rot(acc, a) - acc) * bsk
         let orig = acc.clone();
-        (acc.rot(
-            a.extract()
-                .try_into()
-                .expect("coefficient doesn't fit usize"),
-        ) - orig)
-            .external_product(&self.0[i], params)
+        orig.clone()
+            + (acc.rot(
+                a.extract()
+                    .try_into()
+                    .expect("coefficient doesn't fit usize"),
+            ) - orig)
+                .external_product(&self.0[i], params)
     }
 }
 
@@ -354,21 +355,21 @@ where
         &self,
         ct: LweCiphertext<BaI>,
         params: &Params<BoI, BaI, ER>,
-    ) -> LweCiphertext<BaI> {
+    ) -> LweCiphertext<BaI>
+    where
+        BaI: std::fmt::Debug,
+        ER: std::fmt::Debug,
+    {
         let ct_er = ct.modswitch();
         let mut test_vector = Poly::new(1 << params.log_deg_ntru);
         test_vector.0.iter_mut().for_each(|x| *x = BoI::ONE);
-        let mut acc = NtruScalarCiphertext::trivial_half(test_vector, params).external_product(
-            &NtruVectorCiphertext::monomial(
-                ct_er
-                    .b
-                    .extract()
-                    .try_into()
-                    .expect("Weird platform bit sizes??")
-                    + (1 << (params.log_deg_ntru - 1)),
-                params,
-            ),
-            params,
+        let mut acc = NtruScalarCiphertext::trivial_half(test_vector, params).rot(
+            ct_er
+                .b
+                .extract()
+                .try_into()
+                .expect("Weird platform bit sizes??")
+                + (1 << (params.log_deg_ntru - 1)),
         );
 
         for (i, a) in ct_er.a.into_iter().enumerate() {

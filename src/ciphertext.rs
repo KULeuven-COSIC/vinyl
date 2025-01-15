@@ -103,8 +103,11 @@ impl<T: swanky_field::PrimeFiniteField> NtruScalarCiphertext<T> {
         };
         let mut res = Poly::new(self.ct.0.len());
 
-        for i in 0..len {
-            res.0[(i + n) % len] = sign * self.ct.0[i];
+        for i in 0..(len - n) {
+            res.0[i + n] = sign * self.ct.0[i];
+        }
+        for i in (len - n)..len {
+            res.0[i + n - len] = -sign * self.ct.0[i];
         }
 
         Self { ct: res }
@@ -137,6 +140,16 @@ impl<T: swanky_field::PrimeFiniteField + for<'a> std::ops::Mul<&'a T, Output = T
     /// using the provided scale $\Delta$
     fn trivial_scale(pt: Poly<T>, scale: &T) -> Self {
         Self { ct: pt * scale }
+    }
+}
+
+impl<T: PrimeFiniteField> std::ops::Add<NtruScalarCiphertext<T>> for NtruScalarCiphertext<T> {
+    type Output = Self;
+
+    fn add(self, rhs: NtruScalarCiphertext<T>) -> Self::Output {
+        Self {
+            ct: self.ct + rhs.ct,
+        }
     }
 }
 

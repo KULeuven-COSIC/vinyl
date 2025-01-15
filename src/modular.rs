@@ -295,6 +295,7 @@ impl ModReduce for M61 {
 }
 smallfields::small_field!(@custom_reduce, m61::M61, u64, u128, (1 << 61) - 1, 37);
 
+#[derive(Debug)]
 pub struct Z2k<const K: usize>(u32);
 
 impl<const K: usize> Z2k<K> {
