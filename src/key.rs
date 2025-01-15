@@ -76,7 +76,7 @@ impl LWEKey {
 
         for (a, s) in ct.a.iter_mut().zip(self.iter(dim)) {
             *a = F::random(rng);
-            ct.b += *a * s;
+            ct.b -= *a * s;
         }
         ct.b += int_to_field(sample_discrete_gaussian(stdev, rng).into());
 
@@ -104,7 +104,11 @@ impl LWEKey {
 
     /// Decrypt a ciphertext with explicit parameters, rather than reading from a `Params`
     /// Useful e.g. when dealing with a different field
-    fn decrypt_explicit<F: PrimeFiniteField + for<'a> std::ops::Add<&'a F, Output = F>>(
+    fn decrypt_explicit<
+        F: PrimeFiniteField
+            + for<'a> std::ops::Add<&'a F, Output = F>
+            + for<'a> std::ops::Sub<&'a F, Output = F>,
+    >(
         &self,
         ct: LweCiphertext<F>,
         dim: usize,
@@ -120,7 +124,7 @@ impl LWEKey {
         let mask = self.iter(dim).zip(ct.a).map(|(x, y): (F, F)| x * y).sum();
 
         // Add scale / 2 and floor div to round
-        let out = (ct.b - mask + half_scale).into_int::<1>()
+        let out = (ct.b + &mask + half_scale).into_int::<1>()
             / crypto_bigint::NonZero::new(scale.into_int::<1>()).unwrap();
         out.bit_vartime(0) as u8
     }
@@ -128,7 +132,9 @@ impl LWEKey {
     /// Decrypt a ciphertext
     pub fn decrypt<BoI, BaI, ER>(&self, ct: LweCiphertext<BaI>, params: &Params<BoI, BaI, ER>) -> u8
     where
-        BaI: PrimeFiniteField + for<'a> std::ops::Add<&'a BaI, Output = BaI>,
+        BaI: PrimeFiniteField
+            + for<'a> std::ops::Add<&'a BaI, Output = BaI>
+            + for<'a> std::ops::Sub<&'a BaI, Output = BaI>,
     {
         self.decrypt_explicit(
             ct,
@@ -525,10 +531,10 @@ mod test {
         for _ in 0..10 {
             for b in 0..=1 {
                 let ct = key.base.encrypt(b, params, rng);
-                let ct1 = evk.bootstrap(ct.clone(), params);
-                let ct2 = evk.bootstrap(ct1.clone(), params);
-                assert_eq!(key.base.decrypt(ct, params), b);
-                assert_eq!(key.base.decrypt(ct1, params), b);
+                assert_eq!(key.base.decrypt(ct.clone(), params), b);
+                let ct1 = evk.bootstrap(ct, params);
+                assert_eq!(key.base.decrypt(ct1.clone(), params), b);
+                let ct2 = evk.bootstrap(ct1, params);
                 assert_eq!(key.base.decrypt(ct2, params), b);
             }
         }
