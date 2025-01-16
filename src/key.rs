@@ -139,8 +139,8 @@ impl LWEKey {
 /// and its inverse mod X^N + 1
 #[derive(Debug, Clone)]
 #[cfg_vis::cfg_vis(feature = "bench", pub)]
-struct NTRUKey {
-    #[cfg(test)]
+pub(crate) struct NTRUKey {
+    #[cfg(all(test, not(feature = "bench")))]
     /// `4*f' + 1`, the polynomial before inversion
     f: FFTPoly,
     /// `f^-1` the actual thing used for encryption in practice
@@ -151,7 +151,7 @@ impl NTRUKey {
     /// Generate a fresh NTRU/NGS key of given degree
     /// Also returns the coefficient vector that can be used to generate a NTRU->LWE KSK
     #[cfg_vis::cfg_vis(feature = "bench", pub)]
-    fn new<P: Params>(rng: &mut impl Rng) -> (Self, Poly<P::BootInt>)
+    pub(crate) fn new<P: Params>(rng: &mut impl Rng) -> (Self, Poly<P::BootInt>)
     where
         P::BootInt: PrimeFiniteField,
     {
@@ -165,7 +165,7 @@ impl NTRUKey {
             if let Some(finv) = f.invert() {
                 return (
                     Self {
-                        #[cfg(test)]
+                        #[cfg(all(test, not(feature = "bench")))]
                         f: P::fft().fwd(f.clone()),
                         finv: P::fft().fwd(finv),
                     },
@@ -201,7 +201,7 @@ impl NTRUKey {
         NtruVectorCiphertext { ct: res }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, not(feature = "bench")))]
     pub(crate) fn dec_scalar<P: Params>(
         &self,
         ct: NtruScalarCiphertext<P::BootInt>,
@@ -378,10 +378,9 @@ where
 #[derive(Debug)]
 pub struct Key<P: Params> {
     base: LWEKey,
-    #[cfg(test)]
     /// The key used for the NGS things, decryption isn't needed during regular execution
     /// but to debug could be useful
-    boot: NTRUKey,
+    // boot: NTRUKey,
     public: PublicKey<P>,
 }
 
@@ -398,8 +397,7 @@ where
 
         Key {
             base,
-            #[cfg(test)]
-            boot,
+            // boot,
             public: PublicKey { ksk, bsk },
         }
     }
@@ -423,6 +421,8 @@ mod test {
 
     use super::*;
     use crate::{params::TestParams, test_utils::*};
+
+    #[cfg(not(feature = "bench"))]
     type BootInt = <TestParams as Params>::BootInt;
 
     #[test]
@@ -437,6 +437,7 @@ mod test {
         }
     }
 
+    #[cfg(not(feature = "bench"))]
     #[test]
     fn ntru_decrypt_trivial() {
         let rng = &mut rng(None);
@@ -450,6 +451,7 @@ mod test {
         assert_eq!(scalar, key.dec_scalar::<TestParams>(x));
     }
 
+    #[cfg(not(feature = "bench"))]
     #[test]
     fn ntru_decrypt_noisy() {
         let rng = &mut rng(None);
@@ -503,6 +505,7 @@ mod test {
         }
     }
 
+    #[cfg(not(feature = "bench"))]
     #[test]
     fn enc_ksk_dec() {
         let rng = &mut rng(None);

@@ -177,35 +177,32 @@ impl NtruVectorCiphertext {
         Self { ct }
     }
 
-    #[cfg(test)]
-    pub(crate) fn monomial<P: Params>(exponent: usize) -> Self
-    where
-        P::BootInt: PrimeFiniteField,
-    {
-        #[allow(non_snake_case)]
-        let N = 1 << P::LOG_DEG_NTRU;
-        let mut poly = Poly::new(N);
-        let exponent = exponent % (2 * N);
-        let (exponent, value) = if exponent >= N {
-            (exponent - N, -P::BootInt::ONE)
-        } else {
-            (exponent, P::BootInt::ONE)
-        };
-        poly.0[exponent] = value;
-        Self::trivial::<P>(poly)
-    }
+    // pub(crate) fn monomial<P: Params>(exponent: usize) -> Self
+    // where
+    //     P::BootInt: PrimeFiniteField,
+    // {
+    //     #[allow(non_snake_case)]
+    //     let N = 1 << P::LOG_DEG_NTRU;
+    //     let mut poly = Poly::new(N);
+    //     let exponent = exponent % (2 * N);
+    //     let (exponent, value) = if exponent >= N {
+    //         (exponent - N, -P::BootInt::ONE)
+    //     } else {
+    //         (exponent, P::BootInt::ONE)
+    //     };
+    //     poly.0[exponent] = value;
+    //     Self::trivial::<P>(poly)
+    // }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::modular::{int_to_field, sample_ternary};
     use crate::params::{Params, TestParams};
     use crate::test_utils::*;
 
     type BootInt = <TestParams as Params>::BootInt;
 
-    use rand::Rng;
     use swanky_field::FiniteRing;
 
     #[test]
@@ -241,8 +238,12 @@ mod test {
         }
     }
 
+    #[cfg(not(feature = "bench"))]
     #[test]
     fn external_product_noisy() {
+        use crate::modular::{int_to_field, sample_ternary};
+        use rand::Rng;
+
         let rng = &mut rng(None);
         let len = 1 << TestParams::LOG_DEG_NTRU;
         let (key, _) = crate::key::NTRUKey::new::<TestParams>(rng);

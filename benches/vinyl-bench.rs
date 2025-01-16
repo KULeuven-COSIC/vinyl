@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use rand::{rngs::OsRng, Rng};
 use vinyl::{
     bench::{fft::FFTPlan, poly::Poly},
@@ -83,7 +85,11 @@ fn complex_mult(c: &mut Criterion) {
     });
 }
 
-criterion_group!(bench_bootstrap, single_bootstrap, double_bootstrap);
+criterion_group!(
+    name = bench_bootstrap;
+    config = Criterion::default().measurement_time(Duration::from_secs(20));
+    targets = single_bootstrap, double_bootstrap
+);
 
 fn single_bootstrap(c: &mut Criterion) {
     let rng = &mut OsRng;
