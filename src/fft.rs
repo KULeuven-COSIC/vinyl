@@ -18,7 +18,7 @@ use tfhe_fft::fft128::{f128, Plan};
 /// The FFT engine, enabling transformations between Poly and FFTPoly,
 /// multiplication of the FFTPoly corresponds to a negacyclic convolution
 #[derive(Debug)]
-pub(crate) struct FFTPlan {
+pub struct FFTPlan {
     inner: Plan,
 }
 

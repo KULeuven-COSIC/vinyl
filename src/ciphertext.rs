@@ -1,4 +1,6 @@
-use swanky_field::{FiniteRing, PrimeFiniteField};
+#[cfg(test)]
+use swanky_field::FiniteRing;
+use swanky_field::PrimeFiniteField;
 
 use crate::{
     modular::ModSwitch,
@@ -159,6 +161,7 @@ impl<T: PrimeFiniteField> std::ops::Sub<NtruScalarCiphertext<T>> for NtruScalarC
 }
 
 impl NtruVectorCiphertext {
+    #[cfg(test)]
     pub(crate) fn trivial<P: Params>(m: Poly<P::BootInt>) -> Self
     where
         P::BootInt: PrimeFiniteField,
@@ -174,6 +177,7 @@ impl NtruVectorCiphertext {
         Self { ct }
     }
 
+    #[cfg(test)]
     pub(crate) fn monomial<P: Params>(exponent: usize) -> Self
     where
         P::BootInt: PrimeFiniteField,
