@@ -60,7 +60,7 @@ pub(crate) type TESTTYPE = M31;
 #[cfg(test)]
 pub static TESTPARAMS: Params<TESTTYPE, TESTTYPE, Z2k<12>> = Params::new(|| ParamsInner {
     _tp: std::marker::PhantomData,
-    dim_lwe: 930,
+    dim_lwe: 500,
     log_deg_ntru: 10,
     dim_ngs: 3,
     gadget_base: <M31 as crate::modular::Modular>::new_unchecked(1 << 11),

@@ -256,15 +256,20 @@ impl<F: PrimeFiniteField> KskNtruLwe<F> {
         params: &Params<F, BaI, ER>,
         rng: &mut impl Rng,
     ) -> Self {
+        let mut sample = |delta: F| -> LweCiphertext<F> {
+            let mut ct = lwe.sample(params.dim_lwe, params.err_stdev_lwe, rng);
+            debug_assert_ne!(ct.a.len(), 0);
+            ct.b += delta;
+            ct
+        };
+
         let mut res = Vec::with_capacity(params.ksk_ntru_lwe_dim);
         let mut base = F::ONE;
         for _ in 0..params.ksk_ntru_lwe_dim {
             let mut row = Vec::with_capacity(ntru.degree() + 1);
-            for coef in ntru.0.iter() {
-                let mut ct = lwe.sample(params.dim_lwe, params.err_stdev_lwe, rng);
-                debug_assert_ne!(ct.a.len(), 0);
-                ct.b += base.clone() * *coef;
-                row.push(ct)
+            row.push(sample(base.clone() * ntru.0[0]));
+            for coef in ntru.0.iter().skip(1).rev() {
+                row.push(sample(-base.clone() * *coef));
             }
             res.push(row);
             base = base * params.ksk_ntru_lwe_base;
@@ -361,11 +366,7 @@ where
         &self,
         ct: LweCiphertext<BaI>,
         params: &Params<BoI, BaI, ER>,
-    ) -> LweCiphertext<BaI>
-    where
-        BaI: std::fmt::Debug,
-        ER: std::fmt::Debug,
-    {
+    ) -> LweCiphertext<BaI> {
         let ct_er = ct.modswitch();
         let mut test_vector = Poly::new(1 << params.log_deg_ntru);
         test_vector.0.iter_mut().for_each(|x| *x = BoI::ONE);
@@ -397,7 +398,7 @@ where
 pub struct Key<'a, BootInt, BaseInt, ER> {
     params: &'a Params<BootInt, BaseInt, ER>,
     base: LWEKey,
-    #[cfg(debug_assertions)]
+    #[cfg(test)]
     /// The key used for the NGS things, decryption isn't needed during regular execution
     /// but to debug could be useful
     boot: NTRUKey,
@@ -418,7 +419,7 @@ where
         Key {
             params,
             base,
-            #[cfg(debug_assertions)]
+            #[cfg(test)]
             boot,
             public: PublicKey { params, ksk, bsk },
         }
@@ -495,7 +496,7 @@ mod test {
     }
 
     #[test]
-    fn enc_ksk_dec() {
+    fn trivial_ksk_dec() {
         let rng = &mut rng(None);
         let params = &TESTPARAMS;
         let lwe_key = LWEKey::new(params.dim_lwe, rng);
@@ -522,13 +523,48 @@ mod test {
     }
 
     #[test]
+    fn enc_ksk_dec() {
+        let rng = &mut rng(None);
+        let params = &TESTPARAMS;
+        let lwe_key = LWEKey::new(params.dim_lwe, rng);
+        let (ntru_key, ntru_coefs) = NTRUKey::new(params, rng);
+        let scalar_one = NtruScalarCiphertext::trivial(
+            Poly::new(1 << params.log_deg_ntru) + TESTTYPE::ONE,
+            params,
+        );
+        let ksk = KskNtruLwe::new(&ntru_coefs, &lwe_key, params, rng);
+
+        for _ in 0..100 {
+            for b in 0..=1 {
+                let ntru_ct = scalar_one
+                    .clone()
+                    .external_product(&ntru_key.enc_bit_vec(b, params, rng), params);
+
+                assert_eq!(
+                    ntru_key.dec_scalar(ntru_ct.clone(), params).0[0],
+                    int_to_field(b.into())
+                );
+
+                let lwe_ct = ksk.key_switch(ntru_ct, params);
+                let dec = lwe_key.decrypt_explicit(
+                    lwe_ct,
+                    params.dim_lwe,
+                    &params.half_scale_ntru,
+                    &params.scale_ntru,
+                );
+                assert_eq!(b, dec);
+            }
+        }
+    }
+
+    #[test]
     fn bootstrap() {
         let rng = &mut rng(None);
         let params = &TESTPARAMS;
         let key = Key::new(&params, rng);
         let evk = key.export();
 
-        for _ in 0..10 {
+        for _ in 0..100 {
             for b in 0..=1 {
                 let ct = key.base.encrypt(b, params, rng);
                 assert_eq!(key.base.decrypt(ct.clone(), params), b);
