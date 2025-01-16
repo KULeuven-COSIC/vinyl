@@ -1,7 +1,8 @@
-use swanky_field::PrimeFiniteField;
+use swanky_field::{FiniteRing, PrimeFiniteField};
 
 use crate::{
     modular::ModSwitch,
+    params::Params,
     poly::{FFTPoly, Poly},
 };
 
@@ -74,17 +75,17 @@ impl<T: swanky_field::PrimeFiniteField> NtruScalarCiphertext<T> {
     /// Not implemented as a Mul trait for two reasons:
     /// - We need access to the params
     /// - This is costly, so explicit is better than implicit here
-    pub(crate) fn external_product<BaI, ER>(
+    pub(crate) fn external_product<P: Params<BootInt = T>>(
         self,
         rhs: &NtruVectorCiphertext,
-        params: &crate::params::Params<T, BaI, ER>,
+        fft: &crate::fft::FFTPlan,
     ) -> Self {
         Self {
-            ct: params.fft.inv(
-                self.gadget_decomp(params.dim_ngs, params.gadget_base)
+            ct: fft.inv(
+                self.gadget_decomp(P::DIM_NGS, P::gadget_base())
                     .into_iter()
                     .zip(rhs.ct.iter())
-                    .map(|(x, y)| params.fft.fwd(x) * y)
+                    .map(|(x, y)| fft.fwd(x) * y)
                     .sum(),
             ),
         }
@@ -120,20 +121,14 @@ impl<T: swanky_field::PrimeFiniteField + for<'a> std::ops::Mul<&'a T, Output = T
     #[cfg(test)]
     /// Construct a trivial ciphertext embedding `pt`, with no noise;
     /// using the "normal" scale $\Delta = Q/4$
-    pub(crate) fn trivial<BaI, ER>(
-        pt: Poly<T>,
-        params: &crate::params::Params<T, BaI, ER>,
-    ) -> Self {
-        Self::trivial_scale(pt, &params.scale_ntru)
+    pub(crate) fn trivial<P: Params<BootInt = T>>(pt: Poly<T>) -> Self {
+        Self::trivial_scale(pt, &P::scale_ntru())
     }
 
     /// Construct a trivial ciphertext embedding `pt`, with no noise;
     /// using the "halved" scale $\Delta = Q/8$ as used for the test vector
-    pub(crate) fn trivial_half<BaI, ER>(
-        pt: Poly<T>,
-        params: &crate::params::Params<T, BaI, ER>,
-    ) -> Self {
-        Self::trivial_scale(pt, &params.half_scale_ntru)
+    pub(crate) fn trivial_half<P: Params<BootInt = T>>(pt: Poly<T>) -> Self {
+        Self::trivial_scale(pt, &P::half_scale_ntru())
     }
 
     /// Construct a trivial ciphertext embedding `pt`, with no noise;
@@ -164,36 +159,36 @@ impl<T: PrimeFiniteField> std::ops::Sub<NtruScalarCiphertext<T>> for NtruScalarC
 }
 
 impl NtruVectorCiphertext {
-    pub(crate) fn trivial<T: PrimeFiniteField, BaI, ER>(
-        m: Poly<T>,
-        params: &crate::params::Params<T, BaI, ER>,
-    ) -> Self {
-        let mut ct = Vec::with_capacity(params.dim_ngs);
+    pub(crate) fn trivial<P: Params>(m: Poly<P::BootInt>) -> Self
+    where
+        P::BootInt: PrimeFiniteField,
+    {
+        let mut ct = Vec::with_capacity(P::DIM_NGS);
 
-        let mut base = T::ONE;
-        for _ in 0..params.dim_ngs {
-            ct.push(params.fft.fwd(m.clone() * base));
-            base *= params.gadget_base;
+        let mut base = P::BootInt::ONE;
+        for _ in 0..P::DIM_NGS {
+            ct.push(P::fft().fwd(m.clone() * base));
+            base *= P::gadget_base();
         }
 
         Self { ct }
     }
 
-    pub(crate) fn monomial<T: PrimeFiniteField, BaI, ER>(
-        exponent: usize,
-        params: &crate::params::Params<T, BaI, ER>,
-    ) -> Self {
+    pub(crate) fn monomial<P: Params>(exponent: usize) -> Self
+    where
+        P::BootInt: PrimeFiniteField,
+    {
         #[allow(non_snake_case)]
-        let N = 1 << params.log_deg_ntru;
+        let N = 1 << P::LOG_DEG_NTRU;
         let mut poly = Poly::new(N);
         let exponent = exponent % (2 * N);
         let (exponent, value) = if exponent >= N {
-            (exponent - N, -T::ONE)
+            (exponent - N, -P::BootInt::ONE)
         } else {
-            (exponent, T::ONE)
+            (exponent, P::BootInt::ONE)
         };
         poly.0[exponent] = value;
-        Self::trivial(poly, params)
+        Self::trivial::<P>(poly)
     }
 }
 
@@ -201,8 +196,10 @@ impl NtruVectorCiphertext {
 mod test {
     use super::*;
     use crate::modular::{int_to_field, sample_ternary};
-    use crate::params::{TESTPARAMS, TESTTYPE};
+    use crate::params::{Params, TestParams};
     use crate::test_utils::*;
+
+    type BootInt = <TestParams as Params>::BootInt;
 
     use rand::Rng;
     use swanky_field::FiniteRing;
@@ -210,13 +207,13 @@ mod test {
     #[test]
     fn gadget_decomp_consistency() {
         let rng = &mut rng(None);
-        let poly = Poly::<TESTTYPE>::rand(1 << TESTPARAMS.log_deg_ntru, rng);
+        let poly = Poly::<BootInt>::rand(1 << TestParams::LOG_DEG_NTRU, rng);
         let decomp = NtruScalarCiphertext { ct: poly.clone() }
-            .gadget_decomp(TESTPARAMS.dim_ngs, TESTPARAMS.gadget_base);
+            .gadget_decomp(TestParams::DIM_NGS, TestParams::gadget_base());
         let sum = decomp
             .into_iter()
             .enumerate()
-            .map(|(i, x)| x * TESTPARAMS.gadget_base.pow_var_time(i as u128))
+            .map(|(i, x)| x * TestParams::gadget_base().pow_var_time(i as u128))
             .sum::<Poly<_>>();
         assert_eq!(poly, sum);
     }
@@ -224,20 +221,18 @@ mod test {
     #[test]
     fn external_product_trivial() {
         let rng = &mut rng(None);
-        let params = &TESTPARAMS;
 
         for _ in 0..5 {
-            let scalar = Poly::<TESTTYPE>::rand(1 << params.log_deg_ntru, rng);
-            let x = NtruScalarCiphertext::trivial(scalar.clone(), params);
+            let scalar = Poly::<BootInt>::rand(1 << TestParams::LOG_DEG_NTRU, rng);
+            let x = NtruScalarCiphertext::trivial::<TestParams>(scalar.clone());
 
-            let vector = Poly::<TESTTYPE>::rand(1 << params.log_deg_ntru, rng);
-            let y = NtruVectorCiphertext::trivial(vector.clone(), params);
+            let vector = Poly::<BootInt>::rand(1 << TestParams::LOG_DEG_NTRU, rng);
+            let y = NtruVectorCiphertext::trivial::<TestParams>(vector.clone());
 
-            let z = x.external_product(&y, params);
-            let poly_prod = NtruScalarCiphertext::trivial(
-                Poly(slow_negacyclic_mult(&scalar.0, &vector.0, TESTTYPE::ZERO)),
-                params,
-            );
+            let z = x.external_product::<TestParams>(&y, TestParams::fft());
+            let poly_prod = NtruScalarCiphertext::trivial::<TestParams>(Poly(
+                slow_negacyclic_mult(&scalar.0, &vector.0, BootInt::ZERO),
+            ));
             assert_eq!(z.ct, poly_prod.ct);
         }
     }
@@ -245,43 +240,43 @@ mod test {
     #[test]
     fn external_product_noisy() {
         let rng = &mut rng(None);
-        let params = &TESTPARAMS;
-        let len = 1 << params.log_deg_ntru;
-        let (key, _) = crate::key::NTRUKey::new(params, rng);
+        let len = 1 << TestParams::LOG_DEG_NTRU;
+        let (key, _) = crate::key::NTRUKey::new::<TestParams>(rng);
+        let fft = TestParams::fft();
 
         for _ in 0..5 {
             for bit in 0..=1 {
                 // accumulator is a ternary plaintext
-                let mut scalar = Poly::<TESTTYPE>::new(len);
+                let mut scalar = Poly::<BootInt>::new(len);
                 scalar.iter_mut().for_each(|x| *x = sample_ternary(rng));
-                let x = NtruScalarCiphertext::trivial(scalar.clone(), params);
+                let x = NtruScalarCiphertext::trivial::<TestParams>(scalar.clone());
 
                 // vector ciphertexts are ternary monomials
-                let mut vector1 = Poly::<TESTTYPE>::new(len);
+                let mut vector1 = Poly::<BootInt>::new(len);
                 vector1.0[rng.gen_range(0..len)] = sample_ternary(rng);
-                let y = NtruVectorCiphertext::trivial(vector1.clone(), params);
+                let y = NtruVectorCiphertext::trivial::<TestParams>(vector1.clone());
 
-                let mut vector2 = Poly::<TESTTYPE>::new(len);
+                let mut vector2 = Poly::<BootInt>::new(len);
                 vector2.0[rng.gen_range(0..len)] = sample_ternary(rng);
-                let z = NtruVectorCiphertext::trivial(vector2.clone(), params);
+                let z = NtruVectorCiphertext::trivial::<TestParams>(vector2.clone());
 
-                let mut bit_vec = vec![TESTTYPE::ZERO; len];
+                let mut bit_vec = vec![BootInt::ZERO; len];
                 bit_vec[0] = int_to_field(bit.into());
-                let b = key.enc_bit_vec(bit, params, rng);
+                let b = key.enc_bit_vec::<TestParams>(bit, rng);
 
                 let res = x
-                    .external_product(&y, params)
-                    .external_product(&z, params)
-                    .external_product(&b, params);
-                let dec = key.dec_scalar(res, params);
+                    .external_product::<TestParams>(&y, fft)
+                    .external_product::<TestParams>(&z, fft)
+                    .external_product::<TestParams>(&b, fft);
+                let dec = key.dec_scalar::<TestParams>(res);
                 let poly_prod = slow_negacyclic_mult(
                     &slow_negacyclic_mult(
-                        &slow_negacyclic_mult(&scalar.0, &vector1.0, TESTTYPE::ZERO),
+                        &slow_negacyclic_mult(&scalar.0, &vector1.0, BootInt::ZERO),
                         &vector2.0,
-                        TESTTYPE::ZERO,
+                        BootInt::ZERO,
                     ),
                     &bit_vec,
-                    TESTTYPE::ZERO,
+                    BootInt::ZERO,
                 );
                 assert_eq!(dec, Poly(poly_prod));
             }

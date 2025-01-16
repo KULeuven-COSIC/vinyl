@@ -1,98 +1,165 @@
 //! Parameters defining the entire scheme
 
-use crate::modular::{Z2k, M31, M61};
+use std::ops::IndexMut;
 
-use std::sync::LazyLock;
+#[cfg(test)]
+use crate::modular::M31;
+
+use crate::modular::{Modular, Z2k, M61, Q17, Q20};
 
 /// A cryptographically secure RNG trait for convenience
 pub trait Rng: rand::Rng + rand::CryptoRng {}
 impl<T: rand::Rng + rand::CryptoRng> Rng for T {}
 
-/// Parameters that define the size, security and efficiency of the entire FINAL FHE scheme
-#[derive(Debug)]
-pub struct ParamsInner<BootInt, BaseInt, ExpRing> {
-    _tp: std::marker::PhantomData<ExpRing>,
+pub trait Params {
+    /// The type used for bootstrapping values (NTRU)
+    type BootInt: Modular + std::fmt::Debug;
+    /// The type used for the base encryption scheme (LWE)
+    type BaseInt: Modular + std::fmt::Debug;
+    /// The type use to modswitch for homomorphic decryption during bootstrapping
+    type ExpRing: Modular + std::fmt::Debug;
+
     /// The LWE dimension, for binary LWE secrets
-    pub(crate) dim_lwe: usize,
+    const DIM_LWE: usize;
     /// log2(N) where the NTRU ciphertext are defined over mod X^N + 1
-    pub(crate) log_deg_ntru: u64,
+    const LOG_DEG_NTRU: usize;
     /// The number of components for gadget decomposition
-    pub(crate) dim_ngs: usize,
+    const DIM_NGS: usize;
     /// The base for gadget decomposition, `gadget_base`^`dim_ngs` >= BootInt modulus
-    pub(crate) gadget_base: BootInt,
+    fn gadget_base() -> Self::BootInt;
     /// The dimension of the gadget decomposition in the NTRU->LWE KSK
-    pub(crate) ksk_ntru_lwe_dim: usize,
+    const KSK_NTRU_LWE_DIM: usize;
     /// The base for the decomposition used in the NTRU->LWE KSK
-    pub(crate) ksk_ntru_lwe_base: BootInt,
+    fn ksk_ntru_lwe_base() -> Self::BootInt;
     /// The (discrete) distribution used to sample LWE noise
-    pub(crate) err_stdev_lwe: f64,
+    const ERR_STDEV_LWE: f64;
     /// The (discrete) distribution used for fresh NTRU noise polynomials
-    pub(crate) err_stdev_ntru: f64,
+    const ERR_STDEV_NTRU: f64;
     /// The scale factor to embed the message in an LWE ciphertext
-    pub(crate) scale_lwe: BaseInt,
+    fn scale_lwe() -> Self::BaseInt;
     /// Half the scale factor to embed the message in an LWE ciphertext
-    pub(crate) half_scale_lwe: BaseInt,
+    fn half_scale_lwe() -> Self::BaseInt;
     /// The scale factor to embed the message in an NGS ciphertext
-    pub(crate) scale_ntru: BootInt,
+    fn scale_ntru() -> Self::BootInt;
+    /// Half the scale factor to embed the message in an NGS ciphertext
+    fn half_scale_ntru() -> Self::BootInt;
     /// The scale factor for the NTRU key: f = f' * `scale_ntru_key` + 1
     /// And as such, `scale_ntru` * `scale_ntru_key` ≈ BootInt modulus
-    pub(crate) scale_ntru_key: BootInt,
-    /// Half the scale factor to embed the message in an NGS ciphertext
-    pub(crate) half_scale_ntru: BootInt,
+    fn scale_ntru_key() -> Self::BootInt;
 
-    // NOTE: Putting the lazylock on this doesn't entirely solve
-    // the issue of caching initialization, as (in theory) you could
-    // use multiple `Params` instances with the same ntru degree and
-    // hence duplicate FFTPlan work/space.
-    // It's fine in practice though :)
-    /// The fft plan/engine to use
-    pub(crate) fft: crate::fft::FFTPlan,
+    /// Get the FFT plan for this size NTRU ciphertexts
+    /// Acquiring requires some synchronization, so less is more
+    #[inline]
+    fn fft() -> &'static crate::fft::FFTPlan {
+        use crate::fft::FFTPlan;
+        use std::cell::UnsafeCell;
+        use std::sync::Mutex;
+
+        // SAFETY: we leak the memory, but it should always be an FFT plan of the right size
+        // We do some funky things
+        debug_assert!(
+            Self::LOG_DEG_NTRU < 20,
+            "Add more pointer space for FFT plans"
+        );
+        // Store as usize, because pointers aren't Sync
+        static BY_SIZE: Mutex<UnsafeCell<[usize; 20]>> = Mutex::new(UnsafeCell::new([0; 20]));
+        let mut array = BY_SIZE.lock().expect("Mutex poisoned");
+        let ptr_storage_ref = array.get_mut().index_mut(Self::LOG_DEG_NTRU);
+        if *ptr_storage_ref == 0 {
+            *ptr_storage_ref = Box::leak(Box::new(FFTPlan::new(1 << Self::LOG_DEG_NTRU)))
+                as *const FFTPlan as usize;
+        }
+        unsafe { &*(*ptr_storage_ref as *const FFTPlan) }
+    }
 }
 
-/// Parameters that define the size, security and efficiency of the entire FINAL FHE scheme
-pub type Params<BootInt, BaseInt, ExpRing> = LazyLock<ParamsInner<BootInt, BaseInt, ExpRing>>;
+#[cfg(test)]
+pub enum WeirdParams {}
+#[cfg(test)]
+impl Params for WeirdParams {
+    type BootInt = M31;
+    type BaseInt = M31;
+    type ExpRing = Z2k<12>;
+
+    const DIM_LWE: usize = 500;
+    const LOG_DEG_NTRU: usize = 10;
+    const DIM_NGS: usize = 3;
+    #[inline]
+    fn gadget_base() -> Self::BootInt {
+        Self::BootInt::new_unchecked(1 << 11)
+    }
+    const KSK_NTRU_LWE_DIM: usize = 3;
+    #[inline]
+    fn ksk_ntru_lwe_base() -> Self::BootInt {
+        Self::BootInt::new_unchecked(1 << 11)
+    }
+    const ERR_STDEV_LWE: f64 = 4.39;
+    const ERR_STDEV_NTRU: f64 = 4.39;
+    #[inline]
+    fn scale_lwe() -> Self::BaseInt {
+        Self::BaseInt::new_unchecked(536870912)
+    }
+    #[inline]
+    fn half_scale_lwe() -> Self::BaseInt {
+        Self::BaseInt::new_unchecked(268435456)
+    }
+    #[inline]
+    fn scale_ntru() -> Self::BootInt {
+        Self::BootInt::new_unchecked(536870912)
+    }
+    #[inline]
+    fn half_scale_ntru() -> Self::BootInt {
+        Self::BootInt::new_unchecked(268435456)
+    }
+    #[inline]
+    fn scale_ntru_key() -> Self::BootInt {
+        Self::BootInt::new_unchecked(4)
+    }
+}
+
+pub enum FinalParams {}
+impl Params for FinalParams {
+    type BootInt = Q20;
+    type BaseInt = Q17;
+    type ExpRing = Z2k<12>;
+
+    const DIM_LWE: usize = 610;
+    const LOG_DEG_NTRU: usize = 10;
+    const DIM_NGS: usize = 5;
+    #[inline]
+    fn gadget_base() -> Self::BootInt {
+        Self::BootInt::new_unchecked(16)
+    }
+    const KSK_NTRU_LWE_DIM: usize = 3;
+    #[inline]
+    fn ksk_ntru_lwe_base() -> Self::BootInt {
+        Self::BootInt::new_unchecked(1 << 11)
+    }
+    const ERR_STDEV_LWE: f64 = 4.39;
+    const ERR_STDEV_NTRU: f64 = 4.39;
+    #[inline]
+    fn scale_lwe() -> Self::BaseInt {
+        Self::BaseInt::new_unchecked(23171)
+    }
+    #[inline]
+    fn half_scale_lwe() -> Self::BaseInt {
+        Self::BaseInt::new_unchecked(11585)
+    }
+    #[inline]
+    fn scale_ntru() -> Self::BootInt {
+        Self::BootInt::new_unchecked(228207)
+    }
+    #[inline]
+    fn half_scale_ntru() -> Self::BootInt {
+        Self::BootInt::new_unchecked(114104)
+    }
+    #[inline]
+    fn scale_ntru_key() -> Self::BootInt {
+        Self::BootInt::new_unchecked(4)
+    }
+}
 
 #[cfg(test)]
-pub(crate) type TESTTYPE = M31;
-
-// TODO: check!
-/// Some parameters to test the scheme with during development
+pub use FinalParams as TestParams;
 #[cfg(test)]
-pub static TESTPARAMS: Params<TESTTYPE, TESTTYPE, Z2k<12>> = Params::new(|| ParamsInner {
-    _tp: std::marker::PhantomData,
-    dim_lwe: 500,
-    log_deg_ntru: 10,
-    dim_ngs: 3,
-    gadget_base: <M31 as crate::modular::Modular>::new_unchecked(1 << 11),
-    ksk_ntru_lwe_dim: 3,
-    ksk_ntru_lwe_base: <M31 as crate::modular::Modular>::new_unchecked(1 << 11),
-    err_stdev_lwe: 4.39,
-    err_stdev_ntru: 4.39,
-    scale_lwe: <M31 as crate::modular::Modular>::new_unchecked(536870912),
-    half_scale_lwe: <M31 as crate::modular::Modular>::new_unchecked(268435456),
-    scale_ntru: <M31 as crate::modular::Modular>::new_unchecked(536870912),
-    half_scale_ntru: <M31 as crate::modular::Modular>::new_unchecked(268435456),
-    scale_ntru_key: crate::modular::int_to_field(4u8.into()),
-
-    fft: crate::fft::FFTPlan::new(1 << 10),
-});
-
-// TODO: check, this is entirely random garbage
-pub static LARGEPARAMS: Params<M61, M61, Z2k<16>> = Params::new(|| ParamsInner {
-    _tp: std::marker::PhantomData,
-    dim_lwe: 2048,
-    log_deg_ntru: 14,
-    dim_ngs: 4,
-    gadget_base: <M61 as crate::modular::Modular>::new_unchecked(16),
-    ksk_ntru_lwe_dim: 4,
-    ksk_ntru_lwe_base: <M61 as crate::modular::Modular>::new_unchecked(16),
-    err_stdev_lwe: 12.0,
-    err_stdev_ntru: 12.0,
-    scale_lwe: <M61 as crate::modular::Modular>::new_unchecked(576460752303423488),
-    half_scale_lwe: <M61 as crate::modular::Modular>::new_unchecked(288230376151711744),
-    scale_ntru: <M61 as crate::modular::Modular>::new_unchecked(576460752303423488),
-    half_scale_ntru: <M61 as crate::modular::Modular>::new_unchecked(288230376151711744),
-    scale_ntru_key: crate::modular::int_to_field(4u8.into()),
-
-    fft: crate::fft::FFTPlan::new(1 << 14),
-});
+pub type TESTTYPE = M31;

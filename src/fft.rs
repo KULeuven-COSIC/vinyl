@@ -158,7 +158,7 @@ impl FFTPlan {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::params::TESTTYPE;
+    use crate::params::{Params, TESTTYPE};
     use crate::test_utils::*;
 
     use swanky_field::FiniteRing;
@@ -241,7 +241,7 @@ mod test {
 
     #[test]
     fn fft_roundtrip() {
-        fft_test_roundtrip_size(1 << crate::params::TESTPARAMS.log_deg_ntru);
+        fft_test_roundtrip_size(1 << crate::params::TestParams::LOG_DEG_NTRU);
     }
 
     fn fft_test_mult<F: PrimeFiniteField>(n: usize) {
@@ -280,6 +280,6 @@ mod test {
 
     #[test]
     fn fft_mult() {
-        fft_test_mult::<TESTTYPE>(1 << crate::params::TESTPARAMS.log_deg_ntru);
+        fft_test_mult::<TESTTYPE>(1 << crate::params::TestParams::LOG_DEG_NTRU);
     }
 }

@@ -263,6 +263,7 @@ pub(crate) mod smallfields {
 }
 
 smallfields::small_field!(q20::Q20, u32, u64, 912829, 2);
+smallfields::small_field!(q17::Q17, u32, u64, 92683, 3);
 
 impl ModReduce for M31 {
     #[inline]
