@@ -101,16 +101,12 @@ impl LWEKey {
 
     /// Decrypt a ciphertext with explicit parameters, rather than reading from a `Params`
     /// Useful e.g. when dealing with a different field
-    fn decrypt_explicit<
-        F: PrimeFiniteField
-            + for<'a> std::ops::Add<&'a F, Output = F>
-            + for<'a> std::ops::Sub<&'a F, Output = F>,
-    >(
+    fn decrypt_explicit<F: PrimeFiniteField>(
         &self,
         ct: LweCiphertext<F>,
         dim: usize,
-        half_scale: &F,
-        scale: &F,
+        half_scale: F,
+        scale: F,
     ) -> u8 {
         #[cfg(debug_assertions)]
         {
@@ -129,11 +125,9 @@ impl LWEKey {
     /// Decrypt a ciphertext
     pub fn decrypt<P: Params>(&self, ct: LweCiphertext<P::BaseInt>) -> u8
     where
-        P::BaseInt: PrimeFiniteField
-            + for<'a> std::ops::Add<&'a P::BaseInt, Output = P::BaseInt>
-            + for<'a> std::ops::Sub<&'a P::BaseInt, Output = P::BaseInt>,
+        P::BaseInt: PrimeFiniteField,
     {
-        self.decrypt_explicit(ct, P::DIM_LWE, &P::half_scale_lwe(), &P::scale_lwe())
+        self.decrypt_explicit(ct, P::DIM_LWE, P::half_scale_lwe(), P::scale_lwe())
     }
 }
 
@@ -407,7 +401,13 @@ where
         &self.public
     }
 
-    // TODO: add proxy to encryption and decryption
+    pub fn encrypt(&self, val: u8, rng: &mut impl Rng) -> LweCiphertext<P::BaseInt> {
+        self.base.encrypt::<P>(val, rng)
+    }
+
+    pub fn decrypt(&self, ct: LweCiphertext<P::BaseInt>) -> u8 {
+        self.base.decrypt::<P>(ct)
+    }
 }
 
 #[cfg(test)]
@@ -489,8 +489,8 @@ mod test {
             let dec = lwe_key.decrypt_explicit(
                 lwe_ct,
                 TestParams::DIM_LWE,
-                &TestParams::half_scale_ntru(),
-                &TestParams::scale_ntru(),
+                TestParams::half_scale_ntru(),
+                TestParams::scale_ntru(),
             );
             assert_eq!(plain.0[0], int_to_field(dec.into()));
         }
@@ -523,8 +523,8 @@ mod test {
                 let dec = lwe_key.decrypt_explicit(
                     lwe_ct,
                     TestParams::DIM_LWE,
-                    &TestParams::half_scale_ntru(),
-                    &TestParams::scale_ntru(),
+                    TestParams::half_scale_ntru(),
+                    TestParams::scale_ntru(),
                 );
                 assert_eq!(b, dec);
             }
