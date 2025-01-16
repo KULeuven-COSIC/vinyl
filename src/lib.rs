@@ -16,3 +16,18 @@ pub(crate) mod modular;
 pub(crate) mod poly;
 #[cfg(test)]
 pub(crate) mod test_utils;
+
+#[cfg(feature = "bench")]
+pub mod bench {
+    pub mod fft {
+        pub use crate::fft::*;
+    }
+
+    pub mod modular {
+        pub use crate::modular::*;
+    }
+
+    pub mod poly {
+        pub use crate::poly::*;
+    }
+}

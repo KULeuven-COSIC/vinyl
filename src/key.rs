@@ -14,7 +14,8 @@ type LweKeyEl = u64;
 
 /// An LWE secret key (binary)
 #[derive(Debug)]
-pub struct LWEKey {
+#[cfg_vis::cfg_vis(feature = "bench", pub)]
+struct LWEKey {
     /// The actual key, stored in 64-bit chunks, from LSB to MSB
     key: Vec<LweKeyEl>,
 
@@ -26,7 +27,8 @@ pub struct LWEKey {
 // TODO: We sometimes assume the modulus fits in a single limb
 impl LWEKey {
     /// Sample a new random binary LWE key
-    pub fn new(dim: usize, rng: &mut impl Rng) -> Self {
+    #[cfg_vis::cfg_vis(feature = "bench", pub)]
+    fn new(dim: usize, rng: &mut impl Rng) -> Self {
         // We read slightly more than we really have to
         // but we can ignore the remaining parts where needed
         let mut key = vec![0; dim.div_ceil(LweKeyEl::BITS as usize)];
@@ -85,7 +87,8 @@ impl LWEKey {
     }
 
     /// Encrypt a message
-    pub fn encrypt<P: Params>(&self, message: u8, rng: &mut impl Rng) -> LweCiphertext<P::BaseInt>
+    #[cfg_vis::cfg_vis(feature = "bench", pub)]
+    fn encrypt<P: Params>(&self, message: u8, rng: &mut impl Rng) -> LweCiphertext<P::BaseInt>
     where
         P::BaseInt: PrimeFiniteField,
     {
@@ -123,7 +126,8 @@ impl LWEKey {
     }
 
     /// Decrypt a ciphertext
-    pub fn decrypt<P: Params>(&self, ct: LweCiphertext<P::BaseInt>) -> u8
+    #[cfg_vis::cfg_vis(feature = "bench", pub)]
+    fn decrypt<P: Params>(&self, ct: LweCiphertext<P::BaseInt>) -> u8
     where
         P::BaseInt: PrimeFiniteField,
     {
@@ -134,7 +138,8 @@ impl LWEKey {
 /// An NTRU/NGS key, storing both the original polynomial 4f' + 1,
 /// and its inverse mod X^N + 1
 #[derive(Debug, Clone)]
-pub struct NTRUKey {
+#[cfg_vis::cfg_vis(feature = "bench", pub)]
+struct NTRUKey {
     #[cfg(test)]
     /// `4*f' + 1`, the polynomial before inversion
     f: FFTPoly,
@@ -145,7 +150,8 @@ pub struct NTRUKey {
 impl NTRUKey {
     /// Generate a fresh NTRU/NGS key of given degree
     /// Also returns the coefficient vector that can be used to generate a NTRU->LWE KSK
-    pub fn new<P: Params>(rng: &mut impl Rng) -> (Self, Poly<P::BootInt>)
+    #[cfg_vis::cfg_vis(feature = "bench", pub)]
+    fn new<P: Params>(rng: &mut impl Rng) -> (Self, Poly<P::BootInt>)
     where
         P::BootInt: PrimeFiniteField,
     {
@@ -169,7 +175,7 @@ impl NTRUKey {
         }
     }
 
-    pub fn enc_bit_vec<P: Params>(&self, bit: u8, rng: &mut impl Rng) -> NtruVectorCiphertext
+    pub(crate) fn enc_bit_vec<P: Params>(&self, bit: u8, rng: &mut impl Rng) -> NtruVectorCiphertext
     where
         P::BootInt: PrimeFiniteField,
     {
@@ -233,11 +239,13 @@ impl NTRUKey {
 /// A key-switching key from NTRU to LWE
 // Outer goes over the decomposition, inner over coefficients of f
 #[derive(Clone, Debug)]
+#[cfg_vis::cfg_vis(feature = "bench", pub)]
 struct KskNtruLwe<F>(Vec<Vec<LweCiphertext<F>>>);
 
 impl<F: PrimeFiniteField> KskNtruLwe<F> {
     /// Build a KSK that transfers from ciphertext under the ntru key
     /// to ciphertexts under the lwe key
+    #[cfg_vis::cfg_vis(feature = "bench", pub)]
     fn new<P: Params<BootInt = F>>(ntru: &Poly<F>, lwe: &LWEKey, rng: &mut impl Rng) -> Self {
         let mut sample = |delta: F| -> LweCiphertext<F> {
             let mut ct = lwe.sample(P::DIM_LWE, P::ERR_STDEV_LWE, rng);
@@ -260,10 +268,7 @@ impl<F: PrimeFiniteField> KskNtruLwe<F> {
         Self(res)
     }
 
-    pub fn key_switch<P: Params<BootInt = F>>(
-        &self,
-        ct: NtruScalarCiphertext<F>,
-    ) -> LweCiphertext<F> {
+    fn key_switch<P: Params<BootInt = F>>(&self, ct: NtruScalarCiphertext<F>) -> LweCiphertext<F> {
         let decomp = ct.gadget_decomp(P::KSK_NTRU_LWE_DIM, P::ksk_ntru_lwe_base());
         // Ugly roundtrip through Poly so that we get vectorial addition for free
         let mut a = Poly::new(P::DIM_LWE);
@@ -287,9 +292,11 @@ impl<F: PrimeFiniteField> KskNtruLwe<F> {
 /// A FINAL bootstrapping key: encryptions of an LWE secret key under the NTRU boot key
 /// ready for use in CMUX gates.
 #[derive(Clone, Debug)]
+#[cfg_vis::cfg_vis(feature = "bench", pub)]
 struct Bsk(Vec<NtruVectorCiphertext>);
 
 impl Bsk {
+    #[cfg_vis::cfg_vis(feature = "bench", pub)]
     fn new<P: Params>(boot_key: &NTRUKey, base_key: &LWEKey, rng: &mut impl Rng) -> Self
     where
         P::BootInt: PrimeFiniteField,

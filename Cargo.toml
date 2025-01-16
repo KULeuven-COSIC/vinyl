@@ -5,6 +5,14 @@ edition = "2021"
 
 [lib]
 
+[dev-dependencies]
+criterion = { version = "0.3", features = ["html_reports"] }
+
+[[bench]]
+name = "vinyl-bench"
+harness = false
+required-features = ["bench"]
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -16,3 +24,8 @@ rand = "0.8"
 rand_distr = "0.4"
 crypto-bigint = "0.5.5"
 generic-array = "1.1.1"
+cfg-vis = "0.3.0"
+
+[features]
+default = []
+bench = []

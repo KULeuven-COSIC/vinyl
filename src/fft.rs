@@ -73,6 +73,7 @@ fn f128_to_field<F: PrimeFiniteField>(x: f128) -> F {
 impl FFTPlan {
     /// Create a new FFT plan taking degree `dim - 1` real (finite field) valued polynomials
     /// `dim` should be a power of two
+    #[cfg_vis::cfg_vis(feature = "bench", pub)]
     pub(crate) fn new(dim: usize) -> Self {
         debug_assert_eq!(dim.count_ones(), 1);
 
@@ -84,6 +85,7 @@ impl FFTPlan {
     // TODO? Cached monomial transforms
 
     /// The forward FFT transformation
+    #[cfg_vis::cfg_vis(feature = "bench", pub)]
     pub(crate) fn fwd<F: PrimeFiniteField>(&self, poly: Poly<F>) -> FFTPoly {
         debug_assert_eq!(F::MIN_LIMBS_NEEDED, 1);
         debug_assert_eq!(poly.degree(), 2 * self.inner.fft_size() - 1);
@@ -119,6 +121,7 @@ impl FFTPlan {
     }
 
     /// The inverse FFT transformation
+    #[cfg_vis::cfg_vis(feature = "bench", pub)]
     pub(crate) fn inv<F: PrimeFiniteField>(&self, poly: FFTPoly) -> Poly<F> {
         debug_assert_eq!(F::MIN_LIMBS_NEEDED, 1);
         debug_assert_eq!(poly.0.len(), self.inner.fft_size());
