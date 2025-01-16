@@ -235,7 +235,7 @@ impl<'a, T> IntoIterator for &'a Poly<T> {
     type IntoIter = <&'a [T] as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        (&self.0).into_iter()
+        self.0.iter()
     }
 }
 
@@ -337,7 +337,7 @@ impl<'a, T> IntoIterator for &'a FFTPolyGeneric<T> {
     type IntoIter = <&'a [T] as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        (&self.0).into_iter()
+        self.0.iter()
     }
 }
 

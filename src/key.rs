@@ -28,7 +28,7 @@ impl LWEKey {
     pub fn new(dim: usize, rng: &mut impl Rng) -> Self {
         // We read slightly more than we really have to
         // but we can ignore the remaining parts where needed
-        let mut key = vec![0; (dim + LweKeyEl::BITS as usize - 1) / LweKeyEl::BITS as usize];
+        let mut key = vec![0; dim.div_ceil(LweKeyEl::BITS as usize)];
         for x in key.iter_mut() {
             *x = rng.gen();
         }
@@ -121,10 +121,10 @@ impl LWEKey {
             debug_assert_eq!(dim, self.dim);
             debug_assert!(self.key.len() * LweKeyEl::BITS as usize >= dim);
         }
-        let mask = self.iter(dim).zip(ct.a).map(|(x, y): (F, F)| x * y).sum();
+        let mask: F = self.iter(dim).zip(ct.a).map(|(x, y): (F, F)| x * y).sum();
 
         // Add scale / 2 and floor div to round
-        let out = (ct.b + &mask + half_scale).into_int::<1>()
+        let out = (ct.b + mask + half_scale).into_int::<1>()
             / crypto_bigint::NonZero::new(scale.into_int::<1>()).unwrap();
         out.bit_vartime(0) as u8
     }
@@ -267,12 +267,12 @@ impl<F: PrimeFiniteField> KskNtruLwe<F> {
         let mut base = F::ONE;
         for _ in 0..params.ksk_ntru_lwe_dim {
             let mut row = Vec::with_capacity(ntru.degree() + 1);
-            row.push(sample(base.clone() * ntru.0[0]));
+            row.push(sample(base * ntru.0[0]));
             for coef in ntru.0.iter().skip(1).rev() {
-                row.push(sample(-base.clone() * *coef));
+                row.push(sample(-base * *coef));
             }
             res.push(row);
-            base = base * params.ksk_ntru_lwe_base;
+            base *= params.ksk_ntru_lwe_base;
         }
         Self(res)
     }
@@ -295,7 +295,7 @@ impl<F: PrimeFiniteField> KskNtruLwe<F> {
             debug_assert_eq!(y.0.len(), a_decomp.len());
             for (coef, sample) in y.0.into_iter().zip(a_decomp) {
                 a = a + Poly(sample.a.clone()) * coef;
-                b = b + sample.b * coef;
+                b += sample.b * coef;
             }
         }
         LweCiphertext { a: a.0, b }
@@ -354,7 +354,7 @@ pub struct PublicKey<'a, BootInt, BaseInt, ER> {
     bsk: Bsk,
 }
 
-impl<'a, BoI, BaI, ER> PublicKey<'a, BoI, BaI, ER>
+impl<BoI, BaI, ER> PublicKey<'_, BoI, BaI, ER>
 where
     BaI: ModSwitch<ER>,
     BoI: ModSwitch<BaI> + PrimeFiniteField + for<'b> std::ops::Mul<&'b BoI, Output = BoI>,
@@ -384,9 +384,7 @@ where
         }
 
         // add Q/8 * sum_i X^i
-        acc.ct
-            .iter_mut()
-            .for_each(|x| *x = *x + params.half_scale_ntru);
+        acc.ct.iter_mut().for_each(|x| *x += params.half_scale_ntru);
 
         let acc_lwe = self.ksk.key_switch(acc, params);
         acc_lwe.modswitch()

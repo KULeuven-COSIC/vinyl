@@ -173,7 +173,7 @@ impl NtruVectorCiphertext {
         let mut base = T::ONE;
         for _ in 0..params.dim_ngs {
             ct.push(params.fft.fwd(m.clone() * base));
-            base = base * params.gadget_base;
+            base *= params.gadget_base;
         }
 
         Self { ct }
