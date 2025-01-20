@@ -2,7 +2,8 @@
 
 use crate::ciphertext::{LweCiphertext, NtruScalarCiphertext, NtruVectorCiphertext};
 use crate::modular::{
-    bit_to_field, int_to_field, sample_discrete_gaussian, sample_ternary, ModSwitch, Modular,
+    bit_to_field, int_to_field, sample_discrete_gaussian, sample_gaussian_ternary, sample_ternary,
+    ModSwitch, Modular,
 };
 use crate::params::{Params, Rng};
 use crate::poly::{FFTPoly, Poly};
@@ -175,30 +176,47 @@ impl NTRUKey {
         }
     }
 
-    pub(crate) fn enc_bit_vec<P: Params>(&self, bit: u8, rng: &mut impl Rng) -> NtruVectorCiphertext
+    pub(crate) fn enc_vec<P: Params>(
+        &self,
+        msg: &Poly<P::BootInt>,
+        rng: &mut impl Rng,
+    ) -> NtruVectorCiphertext
     where
         P::BootInt: PrimeFiniteField,
     {
         let fft = P::fft();
         let mut res = Vec::with_capacity(P::DIM_NGS);
-        let mut gadget_base_pow =
-            P::BootInt::try_from_int::<1>(bit.into()).expect("A bit should fit any field");
+        let mut gadget_base_pow = P::BootInt::ONE;
         for _ in 0..P::DIM_NGS {
             let mut g = Poly::<P::BootInt>::new(1 << P::LOG_DEG_NTRU);
             g.iter_mut().for_each(|x| {
                 // TODO: is this discrete gaussian or ternary?
-                *x = int_to_field(sample_discrete_gaussian(P::ERR_STDEV_NTRU, rng).into())
+                *x = sample_gaussian_ternary(rng);
             });
 
             // g / f
             let mut component: Poly<P::BootInt> = fft.inv::<P::BootInt>(fft.fwd(g) * &self.finv);
             // g / f + m * B^i
-            component.0[0] += gadget_base_pow;
+            component = component + msg.clone() * gadget_base_pow;
 
             gadget_base_pow *= P::gadget_base();
             res.push(fft.fwd(component))
         }
         NtruVectorCiphertext { ct: res }
+    }
+
+    #[cfg_vis::cfg_vis(feature = "bench", pub)]
+    pub(crate) fn enc_bit_vec<P: Params>(&self, bit: u8, rng: &mut impl Rng) -> NtruVectorCiphertext
+    where
+        P::BootInt: PrimeFiniteField,
+    {
+        debug_assert!((0..=1).contains(&bit));
+        self.enc_vec::<P>(
+            &(Poly::new(1 << P::LOG_DEG_NTRU)
+                + P::BootInt::try_from_int::<1>(bit.into())
+                    .expect("A bit should always fit in a field")),
+            rng,
+        )
     }
 
     #[cfg(all(test, not(feature = "bench")))]
@@ -268,6 +286,7 @@ impl<F: PrimeFiniteField> KskNtruLwe<F> {
         Self(res)
     }
 
+    #[cfg_vis::cfg_vis(feature = "bench", pub)]
     fn key_switch<P: Params<BootInt = F>>(&self, ct: NtruScalarCiphertext<F>) -> LweCiphertext<F> {
         let decomp = ct.gadget_decomp(P::KSK_NTRU_LWE_DIM, P::ksk_ntru_lwe_base());
         // Ugly roundtrip through Poly so that we get vectorial addition for free

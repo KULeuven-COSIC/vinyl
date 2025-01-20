@@ -77,6 +77,7 @@ impl<T: swanky_field::PrimeFiniteField> NtruScalarCiphertext<T> {
     /// Not implemented as a Mul trait for two reasons:
     /// - We need access to the params
     /// - This is costly, so explicit is better than implicit here
+    #[cfg_vis::cfg_vis(feature = "bench", pub)]
     pub(crate) fn external_product<P: Params<BootInt = T>>(
         self,
         rhs: &NtruVectorCiphertext,
@@ -120,7 +121,8 @@ impl<T: swanky_field::PrimeFiniteField> NtruScalarCiphertext<T> {
 impl<T: swanky_field::PrimeFiniteField + for<'a> std::ops::Mul<&'a T, Output = T>>
     NtruScalarCiphertext<T>
 {
-    #[cfg(test)]
+    #[cfg(any(feature = "bench", test))]
+    #[cfg_vis::cfg_vis(feature = "bench", pub)]
     /// Construct a trivial ciphertext embedding `pt`, with no noise;
     /// using the "normal" scale $\Delta = Q/4$
     pub(crate) fn trivial<P: Params<BootInt = T>>(pt: Poly<T>) -> Self {
@@ -249,7 +251,7 @@ mod test {
         let (key, _) = crate::key::NTRUKey::new::<TestParams>(rng);
         let fft = TestParams::fft();
 
-        for _ in 0..5 {
+        for _ in 0..20 {
             for bit in 0..=1 {
                 // accumulator is a ternary plaintext
                 let mut scalar = Poly::<BootInt>::new(len);
@@ -259,11 +261,11 @@ mod test {
                 // vector ciphertexts are ternary monomials
                 let mut vector1 = Poly::<BootInt>::new(len);
                 vector1.0[rng.gen_range(0..len)] = sample_ternary(rng);
-                let y = NtruVectorCiphertext::trivial::<TestParams>(vector1.clone());
+                let y = key.enc_vec::<TestParams>(&vector1, rng);
 
                 let mut vector2 = Poly::<BootInt>::new(len);
                 vector2.0[rng.gen_range(0..len)] = sample_ternary(rng);
-                let z = NtruVectorCiphertext::trivial::<TestParams>(vector2.clone());
+                let z = key.enc_vec::<TestParams>(&vector2, rng);
 
                 let mut bit_vec = vec![BootInt::ZERO; len];
                 bit_vec[0] = int_to_field(bit.into());

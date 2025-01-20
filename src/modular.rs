@@ -334,9 +334,15 @@ pub(crate) fn sample_discrete_gaussian(stdev: f64, rng: &mut impl Rng) -> u64 {
 }
 
 /// Sample a random ternary element, embedded into the field F
+#[cfg_vis::cfg_vis(feature = "bench", pub)]
 pub(crate) fn sample_ternary<F: swanky_field::PrimeFiniteField>(rng: &mut impl Rng) -> F {
     let r = rng.gen_range(0..3u8).into();
     int_to_field::<F>(r) - F::ONE
+}
+
+pub(crate) fn sample_gaussian_ternary<F: swanky_field::PrimeFiniteField>(rng: &mut impl Rng) -> F {
+    int_to_field::<F>(rng.gen_range(0..=1u8).into())
+        - int_to_field::<F>(rng.gen_range(0..=1u8).into())
 }
 
 /// Lift a bit into the finite field. The bit must be 0 or 1.
