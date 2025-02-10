@@ -288,7 +288,7 @@ impl<F: PrimeFiniteField> KskNtruLwe<F> {
 
     #[cfg_vis::cfg_vis(feature = "bench", pub)]
     fn key_switch<P: Params<BootInt = F>>(&self, ct: NtruScalarCiphertext<F>) -> LweCiphertext<F> {
-        let decomp = ct.gadget_decomp(P::KSK_NTRU_LWE_DIM, P::ksk_ntru_lwe_base());
+        let decomp = ct.gadget_decomp_generic(P::KSK_NTRU_LWE_DIM, P::ksk_ntru_lwe_base());
         // Ugly roundtrip through Poly so that we get vectorial addition for free
         let mut a = Poly::new(P::DIM_LWE);
         let mut b = F::ZERO;

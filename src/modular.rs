@@ -360,7 +360,7 @@ pub(crate) fn bit_to_field<F: swanky_field::FiniteField>(bit: u8) -> F {
 /// Panics when the value is not properly reduced to [0, modulus)
 // TODO: Make this general enough for larger Uints?
 pub(crate) fn int_to_field<F: swanky_field::PrimeFiniteField>(val: crypto_bigint::Limb) -> F {
-    F::try_from_int::<1>(val.into()).expect("Value not reduce for field modulus")
+    F::try_from_int::<1>(val.into()).expect("Value not reduced for field modulus")
 }
 
 pub(crate) fn lift_centered<F: swanky_field::PrimeFiniteField>(val: F) -> i64 {

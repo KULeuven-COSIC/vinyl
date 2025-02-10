@@ -88,10 +88,10 @@ impl Params for WeirdParams {
     fn gadget_base() -> Self::BootInt {
         Self::BootInt::new_unchecked(1 << 11)
     }
-    const KSK_NTRU_LWE_DIM: usize = 3;
+    const KSK_NTRU_LWE_DIM: usize = 20;
     #[inline]
     fn ksk_ntru_lwe_base() -> Self::BootInt {
-        Self::BootInt::new_unchecked(1 << 11)
+        Self::BootInt::new_unchecked(3)
     }
     const ERR_STDEV_LWE: f64 = 4.39;
     const ERR_STDEV_NTRU: f64 = 4.39;
@@ -130,10 +130,10 @@ impl Params for FinalParams {
     fn gadget_base() -> Self::BootInt {
         Self::BootInt::new_unchecked(16)
     }
-    const KSK_NTRU_LWE_DIM: usize = 3;
+    const KSK_NTRU_LWE_DIM: usize = 13;
     #[inline]
     fn ksk_ntru_lwe_base() -> Self::BootInt {
-        Self::BootInt::new_unchecked(1 << 11)
+        Self::BootInt::new_unchecked(3)
     }
     const ERR_STDEV_LWE: f64 = 4.39;
     const ERR_STDEV_NTRU: f64 = 4.39;

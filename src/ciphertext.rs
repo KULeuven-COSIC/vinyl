@@ -3,7 +3,7 @@ use swanky_field::FiniteRing;
 use swanky_field::PrimeFiniteField;
 
 use crate::{
-    modular::ModSwitch,
+    modular::{int_to_field, ModSwitch},
     params::Params,
     poly::{FFTPoly, Poly},
 };
@@ -39,10 +39,40 @@ pub struct NtruVectorCiphertext {
 }
 
 impl<T: swanky_field::PrimeFiniteField> NtruScalarCiphertext<T> {
+    // TODO: again assumes everything fits into a single limb, also not constant time
+    /// Gadget decomposition into `n` parts. Returns an a vec such that
+    /// `sum(result[i] * B^i) = self`
+    /// If base is known to be a power of two, use `gadget_decomp_pow2` instead
+    pub(crate) fn gadget_decomp_generic(self, dim: usize, base: T) -> Vec<Poly<T>> {
+        let mut res = Vec::with_capacity(dim);
+        let mut as_ints: Vec<_> = self
+            .ct
+            .0
+            .into_iter()
+            .map(|x| x.into_int::<1>().as_words()[0])
+            .collect();
+
+        let base_int = base.into_int::<1>().as_words()[0];
+        debug_assert!(base_int.pow(dim as u32) > T::modulus_int::<1>().as_words()[0]);
+
+        for _ in 0..dim {
+            let mut part = Vec::<T>::with_capacity(as_ints.len());
+            for coeff in as_ints.iter_mut() {
+                part.push(int_to_field((*coeff % base_int).into()));
+                *coeff /= base_int;
+            }
+            res.push(Poly(part));
+        }
+        debug_assert!(as_ints.into_iter().all(|x| x == 0));
+
+        res
+    }
+
     // TODO: again assumes everything fits into a single limb
     /// Gadget decomposition into `n` parts. Returns an a vec such that
     /// `sum(result[i] * B^i) = self`
-    pub(crate) fn gadget_decomp(self, dim: usize, base: T) -> Vec<Poly<T>> {
+    /// Assumes `base` is a power of two!
+    pub(crate) fn gadget_decomp_pow2(self, dim: usize, base: T) -> Vec<Poly<T>> {
         let mut res = Vec::with_capacity(dim);
         let mut as_ints: Vec<_> = self
             .ct
@@ -68,7 +98,7 @@ impl<T: swanky_field::PrimeFiniteField> NtruScalarCiphertext<T> {
                 *coeff >>= base_shift;
             }
 
-            res.push(Poly(part))
+            res.push(Poly(part));
         }
         res
     }
@@ -85,7 +115,7 @@ impl<T: swanky_field::PrimeFiniteField> NtruScalarCiphertext<T> {
     ) -> Self {
         Self {
             ct: fft.inv(
-                self.gadget_decomp(P::DIM_NGS, P::gadget_base())
+                self.gadget_decomp_pow2(P::DIM_NGS, P::gadget_base())
                     .into_iter()
                     .zip(rhs.ct.iter())
                     .map(|(x, y)| fft.fwd(x) * y)
@@ -208,11 +238,29 @@ mod test {
     use swanky_field::FiniteRing;
 
     #[test]
-    fn gadget_decomp_consistency() {
+    fn gadget_decomp_consistency_generic() {
+        let rng = &mut rng(None);
+        let poly = Poly::<BootInt>::rand(1 << TestParams::LOG_DEG_NTRU, rng);
+        let decomp = NtruScalarCiphertext { ct: poly.clone() }.gadget_decomp_generic(
+            TestParams::KSK_NTRU_LWE_DIM,
+            TestParams::ksk_ntru_lwe_base(),
+        );
+        assert_eq!(decomp.len(), TestParams::KSK_NTRU_LWE_DIM);
+        let sum = decomp
+            .into_iter()
+            .enumerate()
+            .map(|(i, x)| x * TestParams::ksk_ntru_lwe_base().pow_var_time(i as u128))
+            .sum::<Poly<_>>();
+        assert_eq!(poly, sum);
+    }
+
+    #[test]
+    fn gadget_decomp_consistency_pow2() {
         let rng = &mut rng(None);
         let poly = Poly::<BootInt>::rand(1 << TestParams::LOG_DEG_NTRU, rng);
         let decomp = NtruScalarCiphertext { ct: poly.clone() }
-            .gadget_decomp(TestParams::DIM_NGS, TestParams::gadget_base());
+            .gadget_decomp_pow2(TestParams::DIM_NGS, TestParams::gadget_base());
+        assert_eq!(decomp.len(), TestParams::DIM_NGS);
         let sum = decomp
             .into_iter()
             .enumerate()
