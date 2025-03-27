@@ -31,6 +31,10 @@ pub trait Params {
     const KSK_NTRU_LWE_DIM: usize;
     /// The base for the decomposition used in the NTRU->LWE KSK
     fn ksk_ntru_lwe_base() -> Self::BootInt;
+    /// The dimension of the gadget decomposition in the LWE->LWE KSK
+    const KSK_LWE_LWE_DIM: usize;
+    /// The base for the decomposition used in the LWE->LWE KSK
+    fn ksk_lwe_lwe_base() -> Self::BaseInt;
     /// The (discrete) distribution used to sample LWE noise
     const ERR_STDEV_LWE: f64;
     /// The (discrete) distribution used for fresh NTRU noise polynomials

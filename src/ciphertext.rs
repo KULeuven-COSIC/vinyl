@@ -9,19 +9,31 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
-pub struct LweCiphertext<F> {
-    pub(crate) a: Vec<F>,
+pub struct MKLweCiphertext<F, const N: usize> {
+    pub(crate) a: [Vec<F>; N],
     pub(crate) b: F,
 }
 
-impl<F, T> ModSwitch<LweCiphertext<T>> for LweCiphertext<F>
+// TODO: implement some "claim" functionality or smth to get the single sample out of the array
+pub type LweCiphertext<F> = MKLweCiphertext<F, 1>;
+
+impl<F> LweCiphertext<F> {
+    /// Obtain the single `(a, b)` sample from this ciphertext.
+    /// Useful to avoid pain with the `a` being stored in an array
+    pub(crate) fn unpack(self) -> (Vec<F>, F) {
+        // SAFETY: Single element array, layout works
+        (unsafe { std::mem::transmute(self.a) }, self.b)
+    }
+}
+
+impl<F, T, const N: usize> ModSwitch<MKLweCiphertext<T, N>> for MKLweCiphertext<F, N>
 where
     F: ModSwitch<T>,
 {
-    fn modswitch(self) -> LweCiphertext<T> {
-        LweCiphertext {
+    fn modswitch(self) -> MKLweCiphertext<T, N> {
+        MKLweCiphertext {
             // Via Poly because we can't impl it for Vec easily
-            a: Poly(self.a).modswitch().0,
+            a: self.a.map(|a| Poly(a).modswitch().0),
             b: self.b.modswitch(),
         }
     }
