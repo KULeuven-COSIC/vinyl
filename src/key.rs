@@ -1,6 +1,8 @@
 //! Defining all sorts of cryptographic keys and the operations they can perform
 
-use crate::ciphertext::{LweCiphertext, NtruScalarCiphertext, NtruVectorCiphertext};
+use crate::ciphertext::{
+    LweCiphertext, MKLweCiphertext, NtruScalarCiphertext, NtruVectorCiphertext,
+};
 use crate::modular::{
     bit_to_field, int_to_field, sample_discrete_gaussian, sample_gaussian_ternary, sample_ternary,
     ModSwitch, Modular,
@@ -312,66 +314,69 @@ impl<F: PrimeFiniteField> KskNtruLwe<F> {
     }
 }
 
-/// A key-switching key from sk-LWE to sk-LWE
+/// A key-switching key from sk-LWE to mk-LWE (sk-LWE as an instantiation)
 #[derive(Clone, Debug)]
 #[cfg_vis::cfg_vis(feature = "bench", pub)]
-struct KskLweLwe<F> {
-    k0: Vec<Poly<F>>,
-    k1: Vec<Poly<F>>,
-}
+struct KskLweLwe<F, const N: usize>(Vec<Vec<Vec<MKLweCiphertext<F, N>>>>);
 
-/// $\hat{\phi}(a) = \sum_i a_i X^{-i}
-fn lwe_to_rlwe<F: PrimeFiniteField>(k: &LWEKey, dim: usize) -> Poly<F> {
-    let mut coefs = vec![F::ZERO; dim];
-    k.iter(dim).enumerate().for_each(|(i, e): (_, F)| {
-        coefs[dim - i - 1] = -e;
-    });
-    Poly(coefs)
-}
-
-impl<F: PrimeFiniteField> KskLweLwe<F> {
+impl<F: PrimeFiniteField, const N: usize> KskLweLwe<F, N> {
     #[cfg_vis::cfg_vis(feature = "bench", pub)]
-    fn new<P: Params<BaseInt = F>>(from: &LWEKey, to: &LWEKey, rng: &mut impl Rng) -> Self {
-        let from = lwe_to_rlwe::<F>(from, P::DIM_LWE);
-        let to = lwe_to_rlwe::<F>(to, P::DIM_LWE);
-        // k1 <- random; k0 = to * k1 + from * gadget + err
-        let mut k1 = Vec::with_capacity(P::KSK_LWE_LWE_DIM);
-        for _ in 0..P::KSK_LWE_LWE_DIM {
-            k1.push(Poly::<F>::rand(P::DIM_LWE, rng));
-        }
-        let mut base = F::ONE;
-        let k0 = k1
-            .iter()
-            .map(|p| {
-                let res = Poly(slow_negacyclic_mult(&to.0, &p.0, F::ZERO)) + from.clone() * base; // TODO: noise
-                base = base * P::ksk_lwe_lwe_base();
-                res
-            })
-            .collect();
+    fn new<P: Params<BaseInt = F>>(from: &LWEKey, to: &[LWEKey; N], rng: &mut impl Rng) -> Self {
+        let mut res = Vec::with_capacity(P::DIM_LWE);
+        let base = P::ksk_lwe_lwe_base();
+        // TODO: the usual assumptions
+        let base_int = base.into_int::<1>().as_words()[0];
 
-        Self { k0, k1 }
+        for si in from.iter::<F>(P::DIM_LWE) {
+            let mut outer = Vec::with_capacity(P::KSK_LWE_LWE_DIM);
+            for j in 0..P::KSK_LWE_LWE_DIM {
+                let mut inner = Vec::with_capacity(base_int as usize);
+                for v in 0..base_int {
+                    let b = si * int_to_field(v.into()) * base.pow(j as u128);
+                    let mut ct = MKLweCiphertext {
+                        a: [const { vec![] }; N],
+                        b,
+                    };
+                    for (i, key) in to.iter().enumerate() {
+                        let sample = key.sample(P::DIM_LWE, 0.0, rng); // TODO: noise
+                        ct.b += sample.b;
+                        ct.a[i] = sample.unpack().0;
+                    }
+                    inner.push(ct);
+                }
+                outer.push(inner)
+            }
+            res.push(outer);
+        }
+
+        Self(res)
     }
 
-    pub fn keyswitch<P: Params<BaseInt = F>>(&self, ct: LweCiphertext<F>) -> LweCiphertext<F> {
-        let (a, b) = ct.unpack();
-        // Trickery to get gadget decomposition
-        let c1 = (NtruScalarCiphertext { ct: Poly(a) })
-            .gadget_decomp_generic(P::KSK_LWE_LWE_DIM, P::ksk_lwe_lwe_base());
-        let new_b = b + c1
-            .iter()
-            .zip(self.k0.iter())
-            .map(|(x, y)| x.negacyclic_mul_coeff(y, 0))
-            .sum();
-        let new_a = c1
-            .into_iter()
-            .zip(self.k1.iter())
-            .map(|(x, y)| Poly(slow_negacyclic_mult(&x.0, &y.0, F::ZERO)))
-            .sum::<Poly<F>>();
+    pub fn keyswitch<P: Params<BaseInt = F>>(&self, ct: LweCiphertext<F>) -> MKLweCiphertext<F, N> {
+        let mut res = MKLweCiphertext {
+            a: std::array::from_fn(|_| vec![F::ZERO; P::DIM_LWE]),
+            b: ct.b,
+        };
 
-        LweCiphertext {
-            a: [new_a.0],
-            b: new_b,
+        for (j, aj) in (NtruScalarCiphertext {
+            ct: Poly(ct.unpack().0),
+        })
+        .gadget_decomp_generic(P::KSK_LWE_LWE_DIM, P::ksk_lwe_lwe_base())
+        .iter()
+        .enumerate()
+        {
+            for (i, aij) in aj.0.iter().enumerate() {
+                let aij_int = aij.into_int::<1>().as_words()[0] as usize;
+                res.b -= self.0[i][j][aij_int].b;
+                for k in 0..N {
+                    for l in 0..P::DIM_LWE {
+                        res.a[k][l] -= self.0[i][j][aij_int].a[k][l];
+                    }
+                }
+            }
         }
+
+        res
     }
 }
 
@@ -642,6 +647,23 @@ mod test {
                 assert_eq!(key.base.decrypt::<TestParams>(ct1.clone()), b);
                 let ct2 = evk.bootstrap(ct1);
                 assert_eq!(key.base.decrypt::<TestParams>(ct2), b);
+            }
+        }
+    }
+
+    #[test]
+    fn ks_lwe_lwe() {
+        let rng = &mut rng(None);
+        let k1 = LWEKey::new(TestParams::DIM_LWE, rng);
+        let k2 = [LWEKey::new(TestParams::DIM_LWE, rng)];
+        let ksk = KskLweLwe::new::<TestParams>(&k1, &k2, rng);
+        for _ in 0..100 {
+            for b in 0..=1 {
+                let ct = k1.encrypt::<TestParams>(b, rng);
+                let ct_ks = ksk.keyswitch::<TestParams>(ct);
+                let pt_ks = k2[0].decrypt::<TestParams>(ct_ks);
+                assert_eq!(b, pt_ks);
+                println!("OK once");
             }
         }
     }

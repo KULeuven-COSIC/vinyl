@@ -97,6 +97,11 @@ impl Params for WeirdParams {
     fn ksk_ntru_lwe_base() -> Self::BootInt {
         Self::BootInt::new_unchecked(3)
     }
+    const KSK_LWE_LWE_DIM: usize = 3;
+    #[inline]
+    fn ksk_lwe_lwe_base() -> Self::BaseInt {
+        Self::BaseInt::new_unchecked(1 << 11)
+    }
     const ERR_STDEV_LWE: f64 = 4.39;
     const ERR_STDEV_NTRU: f64 = 4.39;
     #[inline]
@@ -138,6 +143,11 @@ impl Params for FinalParams {
     #[inline]
     fn ksk_ntru_lwe_base() -> Self::BootInt {
         Self::BootInt::new_unchecked(3)
+    }
+    const KSK_LWE_LWE_DIM: usize = 6;
+    #[inline]
+    fn ksk_lwe_lwe_base() -> Self::BaseInt {
+        Self::BaseInt::new_unchecked(8)
     }
     const ERR_STDEV_LWE: f64 = 4.39;
     const ERR_STDEV_NTRU: f64 = 4.39;

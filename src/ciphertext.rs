@@ -22,7 +22,10 @@ impl<F> LweCiphertext<F> {
     /// Useful to avoid pain with the `a` being stored in an array
     pub(crate) fn unpack(self) -> (Vec<F>, F) {
         // SAFETY: Single element array, layout works
-        (unsafe { std::mem::transmute(self.a) }, self.b)
+        (
+            unsafe { std::mem::transmute::<[Vec<F>; 1], Vec<F>>(self.a) },
+            self.b,
+        )
     }
 }
 

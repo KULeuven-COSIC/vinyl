@@ -382,23 +382,3 @@ where
         Poly(self.0.into_iter().map(ModSwitch::modswitch).collect())
     }
 }
-
-impl<F: PrimeFiniteField> Poly<F> {
-    pub(crate) fn negacyclic_mul_coeff(&self, other: &Poly<F>, coeff: usize) -> F {
-        debug_assert_eq!(self.0.len(), other.0.len());
-        debug_assert!(0 <= coeff);
-        debug_assert!(coeff < self.0.len());
-
-        let n = self.0.len();
-        let mut res = F::ZERO;
-        for (i, c) in self.iter().enumerate() {
-            if i <= coeff {
-                res += *c * other.0[coeff - i];
-            } else {
-                res -= *c * other.0[n + coeff - i];
-            }
-        }
-
-        res
-    }
-}
