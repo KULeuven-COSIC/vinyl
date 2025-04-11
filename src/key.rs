@@ -116,7 +116,7 @@ impl LWEKey {
     ) -> u8 {
         #[cfg(debug_assertions)]
         {
-            debug_assert_eq!(ct.a.len(), dim);
+            debug_assert_eq!(ct.a[0].len(), dim);
             debug_assert_eq!(dim, self.dim);
             debug_assert!(self.key.len() * LweKeyEl::BITS as usize >= dim);
         }
@@ -338,7 +338,7 @@ impl<F: PrimeFiniteField, const N: usize> KskLweLwe<F, N> {
                         b,
                     };
                     for (i, key) in to.iter().enumerate() {
-                        let sample = key.sample(P::DIM_LWE, 0.0, rng); // TODO: noise
+                        let sample = key.sample(P::DIM_LWE, P::ERR_STDEV_LWE, rng);
                         ct.b += sample.b;
                         ct.a[i] = sample.unpack().0;
                     }
@@ -367,10 +367,10 @@ impl<F: PrimeFiniteField, const N: usize> KskLweLwe<F, N> {
         {
             for (i, aij) in aj.0.iter().enumerate() {
                 let aij_int = aij.into_int::<1>().as_words()[0] as usize;
-                res.b -= self.0[i][j][aij_int].b;
+                res.b += self.0[i][j][aij_int].b;
                 for k in 0..N {
                     for l in 0..P::DIM_LWE {
-                        res.a[k][l] -= self.0[i][j][aij_int].a[k][l];
+                        res.a[k][l] += self.0[i][j][aij_int].a[k][l];
                     }
                 }
             }
