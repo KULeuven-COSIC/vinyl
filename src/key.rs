@@ -13,25 +13,25 @@ use crate::poly::{FFTPoly, Poly};
 use crypto_bigint::subtle::ConditionallySelectable;
 use swanky_field::{FiniteField, FiniteRing, PrimeFiniteField};
 
-type LweKeyEl = u64;
+pub(crate) type LweKeyEl = u64;
 
 /// An LWE secret key (binary)
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 #[cfg_vis::cfg_vis(feature = "bench", pub)]
-struct LWEKey {
+pub(crate) struct LWEKey {
     /// The actual key, stored in 64-bit chunks, from LSB to MSB
-    key: Vec<LweKeyEl>,
+    pub(crate) key: Vec<LweKeyEl>,
 
     #[cfg(debug_assertions)]
     /// If we're running in debug mode, keep track of the LWE dimension for sanity checks
-    dim: usize,
+    pub(crate) dim: usize,
 }
 
 // TODO: We sometimes assume the modulus fits in a single limb
 impl LWEKey {
     /// Sample a new random binary LWE key
     #[cfg_vis::cfg_vis(feature = "bench", pub)]
-    fn new(dim: usize, rng: &mut impl Rng) -> Self {
+    pub(crate) fn new(dim: usize, rng: &mut impl Rng) -> Self {
         // We read slightly more than we really have to
         // but we can ignore the remaining parts where needed
         let mut key = vec![0; dim.div_ceil(LweKeyEl::BITS as usize)];
@@ -91,7 +91,11 @@ impl LWEKey {
 
     /// Encrypt a message
     #[cfg_vis::cfg_vis(feature = "bench", pub)]
-    fn encrypt<P: Params>(&self, message: u8, rng: &mut impl Rng) -> LweCiphertext<P::BaseInt>
+    pub(crate) fn encrypt<P: Params>(
+        &self,
+        message: u8,
+        rng: &mut impl Rng,
+    ) -> LweCiphertext<P::BaseInt>
     where
         P::BaseInt: PrimeFiniteField,
     {
@@ -105,40 +109,13 @@ impl LWEKey {
         ct
     }
 
-    /// Decrypt a ciphertext with explicit parameters, rather than reading from a `Params`
-    /// Useful e.g. when dealing with a different field
-    fn decrypt_explicit<F: PrimeFiniteField>(
-        &self,
-        ct: LweCiphertext<F>,
-        dim: usize,
-        half_scale: F,
-        scale: F,
-    ) -> u8 {
-        #[cfg(debug_assertions)]
-        {
-            debug_assert_eq!(ct.a[0].len(), dim);
-            debug_assert_eq!(dim, self.dim);
-            debug_assert!(self.key.len() * LweKeyEl::BITS as usize >= dim);
-        }
-        let mask: F = self
-            .iter(dim)
-            .zip(&ct.a[0])
-            .map(|(x, &y): (F, &F)| x * y)
-            .sum();
-
-        // Add scale / 2 and floor div to round
-        let out = (ct.b + mask + half_scale).into_int::<1>()
-            / crypto_bigint::NonZero::new(scale.into_int::<1>()).unwrap();
-        out.bit_vartime(0) as u8
-    }
-
     /// Decrypt a ciphertext
     #[cfg_vis::cfg_vis(feature = "bench", pub)]
     fn decrypt<P: Params>(&self, ct: LweCiphertext<P::BaseInt>) -> u8
     where
         P::BaseInt: PrimeFiniteField,
     {
-        self.decrypt_explicit(ct, P::DIM_LWE, P::half_scale_lwe(), P::scale_lwe())
+        ct.decrypt_explicit(&[self], P::DIM_LWE, P::half_scale_lwe(), P::scale_lwe())
     }
 }
 
@@ -317,11 +294,15 @@ impl<F: PrimeFiniteField> KskNtruLwe<F> {
 /// A key-switching key from sk-LWE to mk-LWE (sk-LWE as an instantiation)
 #[derive(Clone, Debug)]
 #[cfg_vis::cfg_vis(feature = "bench", pub)]
-struct KskLweLwe<F, const N: usize>(Vec<Vec<Vec<MKLweCiphertext<F, N>>>>);
+pub(crate) struct KskLweLwe<F, const N: usize>(Vec<Vec<Vec<MKLweCiphertext<F, N>>>>);
 
 impl<F: PrimeFiniteField, const N: usize> KskLweLwe<F, N> {
     #[cfg_vis::cfg_vis(feature = "bench", pub)]
-    fn new<P: Params<BaseInt = F>>(from: &LWEKey, to: &[LWEKey; N], rng: &mut impl Rng) -> Self {
+    pub(crate) fn new<P: Params<BaseInt = F>, Key: std::borrow::Borrow<LWEKey>>(
+        from: &LWEKey,
+        to: &[Key; N],
+        rng: &mut impl Rng,
+    ) -> Self {
         let mut res = Vec::with_capacity(P::DIM_LWE);
         let base = P::ksk_lwe_lwe_base();
         // TODO: the usual assumptions
@@ -338,7 +319,7 @@ impl<F: PrimeFiniteField, const N: usize> KskLweLwe<F, N> {
                         b,
                     };
                     for (i, key) in to.iter().enumerate() {
-                        let sample = key.sample(P::DIM_LWE, P::ERR_STDEV_LWE, rng);
+                        let sample = key.borrow().sample(P::DIM_LWE, P::ERR_STDEV_LWE, rng);
                         ct.b += sample.b;
                         ct.a[i] = sample.unpack().0;
                     }
@@ -469,7 +450,7 @@ where
 /// A full FINAL key, including all private key material
 #[derive(Debug)]
 pub struct Key<P: Params> {
-    base: LWEKey,
+    pub(crate) base: LWEKey,
     /// The key used for the NGS things, decryption isn't needed during regular execution
     /// but to debug could be useful
     // boot: NTRUKey,
@@ -496,6 +477,10 @@ where
 
     pub fn export(&self) -> &PublicKey<P> {
         &self.public
+    }
+
+    pub fn take_public(self) -> PublicKey<P> {
+        self.public
     }
 
     pub fn encrypt(&self, val: u8, rng: &mut impl Rng) -> LweCiphertext<P::BaseInt> {
@@ -587,8 +572,8 @@ mod test {
             let ntru_ct = NtruScalarCiphertext::trivial::<TestParams>(plain.clone());
             let lwe_ct = ksk.key_switch::<TestParams>(ntru_ct);
 
-            let dec = lwe_key.decrypt_explicit(
-                lwe_ct,
+            let dec = lwe_ct.decrypt_explicit(
+                &[&lwe_key],
                 TestParams::DIM_LWE,
                 TestParams::half_scale_ntru(),
                 TestParams::scale_ntru(),
@@ -622,8 +607,8 @@ mod test {
                 );
 
                 let lwe_ct = ksk.key_switch::<TestParams>(ntru_ct);
-                let dec = lwe_key.decrypt_explicit(
-                    lwe_ct,
+                let dec = lwe_ct.decrypt_explicit(
+                    &[&lwe_key],
                     TestParams::DIM_LWE,
                     TestParams::half_scale_ntru(),
                     TestParams::scale_ntru(),
@@ -656,7 +641,7 @@ mod test {
         let rng = &mut rng(None);
         let k1 = LWEKey::new(TestParams::DIM_LWE, rng);
         let k2 = [LWEKey::new(TestParams::DIM_LWE, rng)];
-        let ksk = KskLweLwe::new::<TestParams>(&k1, &k2, rng);
+        let ksk = KskLweLwe::new::<TestParams, _>(&k1, &k2, rng);
         for _ in 0..100 {
             for b in 0..=1 {
                 let ct = k1.encrypt::<TestParams>(b, rng);

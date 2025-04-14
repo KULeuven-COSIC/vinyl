@@ -9,6 +9,7 @@
 
 pub mod ciphertext;
 pub mod key;
+pub mod multiparty;
 pub mod params;
 
 pub(crate) mod fft;

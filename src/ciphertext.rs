@@ -29,6 +29,57 @@ impl<F> LweCiphertext<F> {
     }
 }
 
+impl<F, const N: usize> MKLweCiphertext<F, N>
+where
+    F: PrimeFiniteField,
+{
+    /// Decrypt a ciphertext with explicit parameters, rather than reading from a `Params`
+    /// Useful e.g. when dealing with a different field
+    pub(crate) fn decrypt_explicit<Key: std::borrow::Borrow<crate::key::LWEKey>>(
+        self,
+        keys: &[Key; N],
+        dim: usize,
+        half_scale: F,
+        scale: F,
+    ) -> u8 {
+        #[cfg(debug_assertions)]
+        {
+            for a in self.a.iter() {
+                debug_assert_eq!(a.len(), dim);
+            }
+            for key in keys {
+                debug_assert_eq!(dim, key.borrow().dim);
+                debug_assert!(key.borrow().key.len() * crate::key::LweKeyEl::BITS as usize >= dim);
+            }
+        }
+        let mask: F = self
+            .a
+            .into_iter()
+            .zip(keys.iter())
+            .flat_map(|(a, key)| {
+                a.into_iter()
+                    .zip(key.borrow().iter(dim))
+                    .map(|(ai, si): (F, F)| ai * si)
+            })
+            .sum();
+
+        // Add scale / 2 and floor div to round
+        let out = (self.b + mask + half_scale).into_int::<1>()
+            / crypto_bigint::NonZero::new(scale.into_int::<1>()).unwrap();
+        out.bit_vartime(0) as u8
+    }
+
+    pub fn decrypt<P: Params<BaseInt = F>, Key: std::borrow::Borrow<crate::key::LWEKey>>(
+        self,
+        keys: &[Key; N],
+    ) -> u8
+    where
+        P::BaseInt: PrimeFiniteField,
+    {
+        self.decrypt_explicit(&keys, P::DIM_LWE, P::half_scale_lwe(), P::scale_lwe())
+    }
+}
+
 impl<F, T, const N: usize> ModSwitch<MKLweCiphertext<T, N>> for MKLweCiphertext<F, N>
 where
     F: ModSwitch<T>,
