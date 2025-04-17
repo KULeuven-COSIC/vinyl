@@ -130,7 +130,7 @@ pub enum FinalParams {}
 impl Params for FinalParams {
     type BootInt = Q20;
     type BaseInt = Q17;
-    type ExpRing = Z2k<12>;
+    type ExpRing = Z2k<11>;
 
     const DIM_LWE: usize = 610;
     const LOG_DEG_NTRU: usize = 10;

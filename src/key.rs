@@ -501,6 +501,8 @@ mod test {
 
     #[cfg(not(feature = "bench"))]
     type BootInt = <TestParams as Params>::BootInt;
+    #[cfg(not(feature = "bench"))]
+    type BaseInt = <TestParams as Params>::BaseInt;
 
     #[test]
     fn lwe_roundtrip() {
@@ -624,13 +626,21 @@ mod test {
         let key = Key::<TestParams>::new(rng);
         let evk = key.export();
 
+        fn double(ct: LweCiphertext<BaseInt>) -> LweCiphertext<BaseInt> {
+            let (a, b) = ct.unpack();
+            LweCiphertext {
+                a: [a.into_iter().map(|ai| ai + ai).collect()],
+                b: b + b,
+            }
+        }
+
         for _ in 0..100 {
             for b in 0..=1 {
                 let ct = key.base.encrypt::<TestParams>(b, rng);
                 assert_eq!(key.base.decrypt::<TestParams>(ct.clone()), b);
-                let ct1 = evk.bootstrap(ct);
+                let ct1 = evk.bootstrap(double(ct));
                 assert_eq!(key.base.decrypt::<TestParams>(ct1.clone()), b);
-                let ct2 = evk.bootstrap(ct1);
+                let ct2 = evk.bootstrap(double(ct1));
                 assert_eq!(key.base.decrypt::<TestParams>(ct2), b);
             }
         }

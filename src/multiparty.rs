@@ -67,9 +67,9 @@ where
             a: [a.a[0]
                 .iter()
                 .zip(b.a[0].iter())
-                .map(|(ai, bi)| -*ai - *bi)
+                .map(|(ai, bi)| *ai + *bi)
                 .collect()],
-            b: int_to_field::<P::BaseInt>(multiplier.into()) * P::half_scale_lwe() - a.b - b.b,
+            b: int_to_field::<P::BaseInt>(multiplier.into()) * P::half_scale_lwe() + a.b + b.b,
         })
     }
 
