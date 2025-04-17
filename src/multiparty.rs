@@ -102,7 +102,7 @@ where
         a: &LweCiphertext<P::BaseInt>,
         b: &LweCiphertext<P::BaseInt>,
     ) -> LweCiphertext<P::BaseInt> {
-        self.combine(5u64, a, b)
+        self.combine(3u64, a, b)
     }
 
     pub fn and(
@@ -110,7 +110,7 @@ where
         a: &LweCiphertext<P::BaseInt>,
         b: &LweCiphertext<P::BaseInt>,
     ) -> LweCiphertext<P::BaseInt> {
-        self.combine(1u64, a, b)
+        self.combine(7u64, a, b)
     }
 
     pub fn or(
@@ -118,7 +118,7 @@ where
         a: &LweCiphertext<P::BaseInt>,
         b: &LweCiphertext<P::BaseInt>,
     ) -> LweCiphertext<P::BaseInt> {
-        self.combine(7u64, a, b)
+        self.combine(1u64, a, b)
     }
 }
 
