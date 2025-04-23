@@ -37,6 +37,8 @@ fn main() {
     for _ in 0..100 {
         for b0 in 0..=1 {
             let ct0 = server.input(0, clients[0].encrypt::<Params>(b0, rng));
+            let xx = server.output_noise(ct0.clone(), b0, &clients);
+            println!("Straight bit: {b0} -> ({}, {})", xx.0, xx.1);
             for b1 in 0..=1 {
                 let ct1 = server.input(0, clients[0].encrypt::<Params>(b1, rng));
 
@@ -55,8 +57,11 @@ fn main() {
                     (and, b0 & b1),
                     (or, b0 | b1),
                 ] {
+                    let noises = server.output_noise(ct.clone(), v, &clients);
+                    println!("{b0}{b1} -> {v}: ({}, {})", noises.0, noises.1);
                     assert_eq!(server.output(ct).decrypt::<Params, _>(&clients), v);
                 }
+                println!();
             }
         }
     }

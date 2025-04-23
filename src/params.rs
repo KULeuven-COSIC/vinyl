@@ -149,7 +149,7 @@ impl Params for FinalParams {
     fn ksk_lwe_lwe_base() -> Self::BaseInt {
         Self::BaseInt::new_unchecked(8)
     }
-    const ERR_STDEV_LWE: f64 = 3.0;
+    const ERR_STDEV_LWE: f64 = 4.39;
     const ERR_STDEV_NTRU: f64 = 4.39;
     #[inline]
     fn scale_lwe() -> Self::BaseInt {

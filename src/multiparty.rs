@@ -34,6 +34,7 @@ pub struct Server<P: Params, const N: usize> {
     evaluation_key: PublicKey<P>,
     input_ksks: [KskLweLwe<P::BaseInt, 1>; N],
     output_ksk: KskLweLwe<P::BaseInt, N>,
+    secret_key: LWEKey, // TODO
 }
 
 impl<P: Params, const N: usize> Server<P, N>
@@ -54,6 +55,45 @@ where
 
     pub fn output(&self, ct: LweCiphertext<P::BaseInt>) -> MKLweCiphertext<P::BaseInt, N> {
         self.output_ksk.keyswitch::<P>(ct)
+    }
+
+    pub fn output_noise(
+        &self,
+        ct: LweCiphertext<P::BaseInt>,
+        m: u8,
+        clients: &[Client; N],
+    ) -> (usize, usize) {
+        fn noise<P: Params, const N: usize>(
+            ct: MKLweCiphertext<P::BaseInt, N>,
+            key: &[impl std::borrow::Borrow<LWEKey>; N],
+            m: u8,
+        ) -> usize
+        where
+            P::BaseInt: PrimeFiniteField,
+        {
+            let mask =
+                ct.a.iter()
+                    .zip(key.iter())
+                    .flat_map(|(as_, k)| {
+                        as_.iter()
+                            .zip(k.borrow().iter(P::DIM_LWE))
+                            .map(|(ai, si): (&P::BaseInt, P::BaseInt)| *ai * si)
+                    })
+                    .sum::<P::BaseInt>();
+            let err = crate::modular::lift_centered(
+                ct.b + mask - P::scale_lwe() * int_to_field(m.into()),
+            );
+            if err.abs() == 0 {
+                0
+            } else {
+                err.abs().ilog2() as usize
+            }
+        }
+
+        (
+            noise::<P, 1>(ct.clone(), &[&self.secret_key], m),
+            noise::<P, N>(self.output(ct), clients, m),
+        )
     }
 
     /// bootstrap(`multiplier` * Δ/2 - (`a` + `b`))
@@ -127,8 +167,11 @@ where
     P::BootInt: PrimeFiniteField,
     P::BaseInt: PrimeFiniteField,
 {
-    let clients = std::array::from_fn(|_| Client::new(P::DIM_LWE, rng));
+    let mut clients = std::array::from_fn(|_| Client::new(P::DIM_LWE, rng));
     let fhe_key = Key::new(rng);
+    clients[0] = Client {
+        key: fhe_key.base.clone(),
+    };
     // TODO: improve on these clones
     let input_ksks =
         std::array::from_fn(|i| KskLweLwe::new::<P, _>(&clients[i].key, &[&fhe_key.base], rng));
@@ -137,10 +180,12 @@ where
         &std::array::from_fn(|i| &clients[i].key),
         rng,
     );
+    let secret_key = fhe_key.base.clone(); // TODO
     let server = Server {
         evaluation_key: fhe_key.take_public(),
         input_ksks,
         output_ksk,
+        secret_key, // TODO
     };
 
     (clients, server)
