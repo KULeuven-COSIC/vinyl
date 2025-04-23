@@ -5,7 +5,7 @@ use std::ops::IndexMut;
 #[cfg(test)]
 use crate::modular::M31;
 
-use crate::modular::{Modular, Z2k, Q17, Q20};
+use crate::modular::{Modular, Z2k, Q17, Q20, Q30, Q35};
 
 /// A cryptographically secure RNG trait for convenience
 pub trait Rng: rand::Rng + rand::CryptoRng {}
@@ -173,7 +173,54 @@ impl Params for FinalParams {
     }
 }
 
+pub enum MKFinalParams {}
+impl Params for MKFinalParams {
+    type BootInt = Q30;
+    type BaseInt = Q35;
+    type ExpRing = Z2k<12>;
+
+    const DIM_LWE: usize = 660;
+    const LOG_DEG_NTRU: usize = 11;
+    const DIM_NGS: usize = 8;
+    #[inline]
+    fn gadget_base() -> Self::BootInt {
+        Self::BootInt::new_unchecked(16)
+    }
+    const KSK_NTRU_LWE_DIM: usize = 23;
+    #[inline]
+    fn ksk_ntru_lwe_base() -> Self::BootInt {
+        Self::BootInt::new_unchecked(3)
+    }
+    const KSK_LWE_LWE_DIM: usize = 9;
+    #[inline]
+    fn ksk_lwe_lwe_base() -> Self::BaseInt {
+        Self::BaseInt::new_unchecked(16)
+    }
+    const ERR_STDEV_LWE: f64 = 4.0;
+    const ERR_STDEV_NTRU: f64 = 0.0;
+    #[inline]
+    fn scale_lwe() -> Self::BaseInt {
+        Self::BaseInt::new_unchecked(8589934605)
+    }
+    #[inline]
+    fn half_scale_lwe() -> Self::BaseInt {
+        Self::BaseInt::new_unchecked(4294967303)
+    }
+    #[inline]
+    fn scale_ntru() -> Self::BootInt {
+        Self::BootInt::new_unchecked(268435457)
+    }
+    #[inline]
+    fn half_scale_ntru() -> Self::BootInt {
+        Self::BootInt::new_unchecked(134217728)
+    }
+    #[inline]
+    fn scale_ntru_key() -> Self::BootInt {
+        Self::BootInt::new_unchecked(4)
+    }
+}
+
 #[cfg(test)]
-pub use FinalParams as TestParams;
+pub use MKFinalParams as TestParams;
 #[cfg(test)]
 pub type TESTTYPE = M31;

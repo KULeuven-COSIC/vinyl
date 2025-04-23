@@ -2,7 +2,7 @@ use vinyl::params::*;
 
 fn main() {
     let rng = &mut rand::rngs::OsRng;
-    type Params = FinalParams;
+    type Params = MKFinalParams;
     let (clients, server) = vinyl::multiparty::setup::<Params, 1>(rng);
     println!("Ready");
     // for line in std::io::stdin().lines() {
