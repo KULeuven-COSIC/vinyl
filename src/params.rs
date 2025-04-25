@@ -5,7 +5,7 @@ use std::ops::IndexMut;
 #[cfg(test)]
 use crate::modular::M31;
 
-use crate::modular::{Modular, Z2k, Q17, Q20, Q30, Q35};
+use crate::modular::{Modular, Z2k, Q17, Q20, Q27, Q30, Q35};
 
 /// A cryptographically secure RNG trait for convenience
 pub trait Rng: rand::Rng + rand::CryptoRng {}
@@ -119,6 +119,53 @@ impl Params for WeirdParams {
     #[inline]
     fn half_scale_ntru() -> Self::BootInt {
         Self::BootInt::new_unchecked(268435456)
+    }
+    #[inline]
+    fn scale_ntru_key() -> Self::BootInt {
+        Self::BootInt::new_unchecked(4)
+    }
+}
+
+pub enum OurParams {}
+impl Params for OurParams {
+    type BootInt = Q20;
+    type BaseInt = Q35;
+    type ExpRing = Z2k<12>;
+
+    const DIM_LWE: usize = 660;
+    const LOG_DEG_NTRU: usize = 11;
+    const DIM_NGS: usize = (Self::BootInt::NBITS as usize + 3) / 4;
+    #[inline]
+    fn gadget_base() -> Self::BootInt {
+        Self::BootInt::new_unchecked(16)
+    }
+    const KSK_NTRU_LWE_DIM: usize = (Self::BootInt::NBITS as f64 / 1.58) as usize + 1;
+    #[inline]
+    fn ksk_ntru_lwe_base() -> Self::BootInt {
+        Self::BootInt::new_unchecked(3)
+    }
+    const KSK_LWE_LWE_DIM: usize = (Self::BaseInt::NBITS as usize + 3) / 4;
+    #[inline]
+    fn ksk_lwe_lwe_base() -> Self::BaseInt {
+        Self::BaseInt::new_unchecked(16)
+    }
+    const ERR_STDEV_LWE: f64 = 2048.0;
+    const ERR_STDEV_NTRU: f64 = 4.39;
+    #[inline]
+    fn scale_lwe() -> Self::BaseInt {
+        Self::BaseInt::new_unchecked(Self::BaseInt::QUARTER)
+    }
+    #[inline]
+    fn half_scale_lwe() -> Self::BaseInt {
+        Self::BaseInt::new_unchecked(Self::BaseInt::EIGHT)
+    }
+    #[inline]
+    fn scale_ntru() -> Self::BootInt {
+        Self::BootInt::new_unchecked(Self::BootInt::QUARTER)
+    }
+    #[inline]
+    fn half_scale_ntru() -> Self::BootInt {
+        Self::BootInt::new_unchecked(Self::BootInt::EIGHT)
     }
     #[inline]
     fn scale_ntru_key() -> Self::BootInt {

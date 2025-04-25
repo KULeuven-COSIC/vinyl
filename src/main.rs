@@ -2,7 +2,7 @@ use vinyl::params::*;
 
 fn main() {
     let rng = &mut rand::rngs::OsRng;
-    type Params = MKFinalParams;
+    type Params = OurParams;
     let (clients, server) = vinyl::multiparty::setup::<Params, 1>(rng);
     println!("Ready");
     // for line in std::io::stdin().lines() {
@@ -40,7 +40,10 @@ fn main() {
             let xx = server.output_noise(ct0.clone(), b0, &clients);
             println!("Straight bit: {b0} -> ({}, {})", xx.0, xx.1);
             for b1 in 0..=1 {
-                let ct1 = server.input(0, clients[0].encrypt::<Params>(b1, rng));
+                let ct1 = server.input(
+                    clients.len() - 1,
+                    clients.last().unwrap().encrypt::<Params>(b1, rng),
+                );
 
                 let not0 = server.not(&ct0);
                 let not1 = server.not(&ct1);

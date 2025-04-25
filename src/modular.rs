@@ -254,6 +254,14 @@ pub(crate) mod smallfields {
 
                 swanky_field::field_ops!($name);
             }
+
+            impl $mod_name::$name {
+                pub const HALF: $single = ($mod as $single) / 2;
+                pub const QUARTER: $single = ($mod as $single) / 4;
+                pub const EIGHT: $single = ($mod as $single) / 8;
+                pub const NBITS: u32 = ($mod as u128).ilog2();
+            }
+
             #[allow(unused_imports)]
             pub use $mod_name::$name;
         };
@@ -266,6 +274,7 @@ smallfields::small_field!(q20::Q20, u32, u64, 912829, 2);
 smallfields::small_field!(q17::Q17, u32, u64, 92683, 3);
 smallfields::small_field!(q30::Q30, u32, u64, 1073741827, 2);
 smallfields::small_field!(q35::Q35, u64, u128, 34359738421, 2);
+smallfields::small_field!(q27::Q27, u32, u64, 134217689, 2);
 
 impl ModReduce for M31 {
     #[inline]
@@ -281,7 +290,7 @@ impl ModReduce for M31 {
     }
 }
 
-smallfields::small_field!(@custom_reduce, m31::M31, u32, u64, (1 << 31) - 1, 7);
+smallfields::small_field!(@custom_reduce, m31::M31, u32, u64, ((1i64 << 31) - 1) as u32, 7);
 
 impl ModReduce for M61 {
     #[inline]
@@ -296,7 +305,7 @@ impl ModReduce for M61 {
         ))
     }
 }
-smallfields::small_field!(@custom_reduce, m61::M61, u64, u128, (1 << 61) - 1, 37);
+smallfields::small_field!(@custom_reduce, m61::M61, u64, u128, ((1i64 << 61) - 1) as u64, 37);
 
 #[derive(Debug)]
 pub struct Z2k<const K: usize>(u32);
