@@ -128,11 +128,11 @@ impl Params for WeirdParams {
 
 pub enum OurParams {}
 impl Params for OurParams {
-    type BootInt = Q20;
-    type BaseInt = Q35;
+    type BootInt = Q35;
+    type BaseInt = Q27;
     type ExpRing = Z2k<12>;
 
-    const DIM_LWE: usize = 660;
+    const DIM_LWE: usize = 800;
     const LOG_DEG_NTRU: usize = 11;
     const DIM_NGS: usize = (Self::BootInt::NBITS as usize + 3) / 4;
     #[inline]
@@ -149,7 +149,7 @@ impl Params for OurParams {
     fn ksk_lwe_lwe_base() -> Self::BaseInt {
         Self::BaseInt::new_unchecked(16)
     }
-    const ERR_STDEV_LWE: f64 = 2048.0;
+    const ERR_STDEV_LWE: f64 = 512.0;
     const ERR_STDEV_NTRU: f64 = 4.39;
     #[inline]
     fn scale_lwe() -> Self::BaseInt {
@@ -243,8 +243,8 @@ impl Params for MKFinalParams {
     fn ksk_lwe_lwe_base() -> Self::BaseInt {
         Self::BaseInt::new_unchecked(16)
     }
-    const ERR_STDEV_LWE: f64 = 4.0;
-    const ERR_STDEV_NTRU: f64 = 0.0;
+    const ERR_STDEV_LWE: f64 = 2048.0;
+    const ERR_STDEV_NTRU: f64 = 4.39;
     #[inline]
     fn scale_lwe() -> Self::BaseInt {
         Self::BaseInt::new_unchecked(8589934605)
