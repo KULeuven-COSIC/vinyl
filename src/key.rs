@@ -27,6 +27,10 @@ pub(crate) struct LWEKey {
     pub(crate) dim: usize,
 }
 
+pub(crate) fn sample_gaussian<F: PrimeFiniteField>(stdev: f64, rng: &mut impl Rng) -> F {
+    int_to_field(sample_discrete_gaussian(stdev, rng).into())
+}
+
 // TODO: We sometimes assume the modulus fits in a single limb
 impl LWEKey {
     /// Sample a new random binary LWE key
@@ -69,10 +73,9 @@ impl LWEKey {
         (0..dim).map(|i| self.get(i))
     }
 
-    pub(crate) fn sample<F: PrimeFiniteField>(
+    pub(crate) fn sample_noisefree<F: PrimeFiniteField>(
         &self,
         dim: usize,
-        stdev: f64,
         rng: &mut impl Rng,
     ) -> LweCiphertext<F> {
         let mut ct = LweCiphertext {
@@ -84,7 +87,18 @@ impl LWEKey {
             *a = F::random(rng);
             ct.b -= *a * s;
         }
-        ct.b += int_to_field(sample_discrete_gaussian(stdev, rng).into());
+
+        ct
+    }
+
+    pub(crate) fn sample<F: PrimeFiniteField>(
+        &self,
+        dim: usize,
+        stdev: f64,
+        rng: &mut impl Rng,
+    ) -> LweCiphertext<F> {
+        let mut ct = self.sample_noisefree(dim, rng);
+        ct.b += sample_gaussian(stdev, rng);
 
         ct
     }
@@ -237,20 +251,48 @@ impl NTRUKey {
 }
 
 // TODO: Generalize to mkLWE
-/// A key-switching key from NTRU to LWE
+/// A key-switching key from NTRU to mk-LWE
 // Outer goes over the decomposition, inner over coefficients of f
 #[derive(Clone, Debug)]
 #[cfg_vis::cfg_vis(feature = "bench", pub)]
-struct KskNtruLwe<F>(Vec<Vec<LweCiphertext<F>>>);
+pub(crate) struct KskNtruMKLwe<F, const N: usize>(Vec<Vec<MKLweCiphertext<F, N>>>);
 
-impl<F: PrimeFiniteField> KskNtruLwe<F> {
+/// A key-switching key from NTRU to sk-LWE
+#[cfg_vis::cfg_vis(feature = "bench", pub)]
+pub(crate) type KskNtruLwe<F> = KskNtruMKLwe<F, 1>;
+
+#[derive(Copy, Clone, Debug)]
+pub(crate) enum KskNoise {
+    Single,
+    PerParty,
+}
+
+impl<F: PrimeFiniteField, const N: usize> KskNtruMKLwe<F, N> {
     /// Build a KSK that transfers from ciphertext under the ntru key
     /// to ciphertexts under the lwe key
     #[cfg_vis::cfg_vis(feature = "bench", pub)]
-    fn new<P: Params<BootInt = F>>(ntru: &Poly<F>, lwe: &LWEKey, rng: &mut impl Rng) -> Self {
-        let mut sample = |delta: F| -> LweCiphertext<F> {
-            let mut ct = lwe.sample(P::DIM_LWE, P::ERR_STDEV_LWE, rng);
-            debug_assert_ne!(ct.a.len(), 0);
+    pub(crate) fn new_mk<P: Params<BootInt = F>>(
+        ntru: &Poly<F>,
+        lwes: &[impl std::borrow::Borrow<LWEKey>; N],
+        rng: &mut impl Rng,
+        noise_mode: KskNoise,
+    ) -> Self {
+        let mut sample_mk = |delta: F| -> MKLweCiphertext<F, N> {
+            let mut ct = MKLweCiphertext {
+                a: [const { vec![] }; N],
+                b: F::ZERO,
+            };
+            for (i, k) in lwes.iter().enumerate() {
+                let (a, b): (Vec<F>, F) = match (noise_mode, i) {
+                    (KskNoise::Single, 0) | (KskNoise::PerParty, _) => {
+                        k.borrow().sample(P::DIM_LWE, P::ERR_STDEV_LWE, rng)
+                    }
+                    (KskNoise::Single, _) => k.borrow().sample_noisefree(P::DIM_LWE, rng),
+                }
+                .unpack();
+                ct.a[i] = a;
+                ct.b += b;
+            }
             ct.b += delta;
             ct
         };
@@ -259,9 +301,9 @@ impl<F: PrimeFiniteField> KskNtruLwe<F> {
         let mut base = F::ONE;
         for _ in 0..P::KSK_NTRU_LWE_DIM {
             let mut row = Vec::with_capacity(ntru.degree() + 1);
-            row.push(sample(base * ntru.0[0]));
+            row.push(sample_mk(base * ntru.0[0]));
             for coef in ntru.0.iter().skip(1).rev() {
-                row.push(sample(-base * *coef));
+                row.push(sample_mk(-base * *coef));
             }
             res.push(row);
             base *= P::ksk_ntru_lwe_base();
@@ -270,10 +312,13 @@ impl<F: PrimeFiniteField> KskNtruLwe<F> {
     }
 
     #[cfg_vis::cfg_vis(feature = "bench", pub)]
-    fn key_switch<P: Params<BootInt = F>>(&self, ct: NtruScalarCiphertext<F>) -> LweCiphertext<F> {
+    fn key_switch<P: Params<BootInt = F>>(
+        &self,
+        ct: NtruScalarCiphertext<F>,
+    ) -> MKLweCiphertext<F, N> {
         let decomp = ct.gadget_decomp_generic(P::KSK_NTRU_LWE_DIM, P::ksk_ntru_lwe_base());
         // Ugly roundtrip through Poly so that we get vectorial addition for free
-        let mut a = Poly::new(P::DIM_LWE);
+        let mut a = std::array::from_fn(|_| Poly::new(P::DIM_LWE));
         let mut b = F::ZERO;
 
         // First on the power of the gadget decomp
@@ -283,11 +328,25 @@ impl<F: PrimeFiniteField> KskNtruLwe<F> {
             #[cfg(debug_assertions)]
             debug_assert_eq!(y.0.len(), a_decomp.len());
             for (coef, sample) in y.0.into_iter().zip(a_decomp) {
-                a = a + Poly(sample.a[0].clone()) * coef;
+                for (ta, sa) in a.iter_mut().zip(sample.a.clone()) {
+                    *ta = ta.clone() + Poly(sa) * coef;
+                }
                 b += sample.b * coef;
             }
         }
-        LweCiphertext { a: [a.0], b }
+        MKLweCiphertext {
+            a: a.map(|a| a.0),
+            b,
+        }
+    }
+}
+
+impl<F: PrimeFiniteField> KskNtruLwe<F> {
+    /// Build a KSK that transfers from ciphertext under the ntru key
+    /// to ciphertexts under the lwe key
+    #[cfg_vis::cfg_vis(feature = "bench", pub)]
+    fn new<P: Params<BootInt = F>>(ntru: &Poly<F>, lwe: &LWEKey, rng: &mut impl Rng) -> Self {
+        Self::new_mk::<P>(ntru, &[lwe], rng, KskNoise::PerParty)
     }
 }
 
@@ -302,6 +361,7 @@ impl<F: PrimeFiniteField, const N: usize> KskLweLwe<F, N> {
         from: &LWEKey,
         to: &[Key; N],
         rng: &mut impl Rng,
+        noise_mode: KskNoise,
     ) -> Self {
         let mut res = Vec::with_capacity(P::DIM_LWE);
         let base = P::ksk_lwe_lwe_base();
@@ -319,7 +379,12 @@ impl<F: PrimeFiniteField, const N: usize> KskLweLwe<F, N> {
                         b,
                     };
                     for (i, key) in to.iter().enumerate() {
-                        let sample = key.borrow().sample(P::DIM_LWE, P::ERR_STDEV_LWE, rng);
+                        let sample = match (noise_mode, i) {
+                            (KskNoise::Single, 0) | (KskNoise::PerParty, _) => {
+                                key.borrow().sample(P::DIM_LWE, P::ERR_STDEV_LWE, rng)
+                            }
+                            (KskNoise::Single, _) => key.borrow().sample_noisefree(P::DIM_LWE, rng),
+                        };
                         ct.b += sample.b;
                         ct.a[i] = sample.unpack().0;
                     }
@@ -420,7 +485,11 @@ where
     <P::ExpRing as Modular>::Single: TryInto<usize>,
     <<P::ExpRing as Modular>::Single as TryInto<usize>>::Error: std::fmt::Debug,
 {
-    pub fn bootstrap(&self, ct: LweCiphertext<P::BaseInt>) -> LweCiphertext<P::BaseInt> {
+    pub(crate) fn bootstrap_with_ksk<const N: usize>(
+        &self,
+        ct: LweCiphertext<P::BaseInt>,
+        ksk: &KskNtruMKLwe<P::BootInt, N>,
+    ) -> MKLweCiphertext<P::BaseInt, N> {
         let fft = P::fft();
         let ct_er = ct.modswitch();
         let mut test_vector = Poly::new(1 << P::LOG_DEG_NTRU);
@@ -442,8 +511,12 @@ where
         // add Q/8 * sum_i X^i
         acc.ct.iter_mut().for_each(|x| *x += P::half_scale_ntru());
 
-        let acc_lwe = self.ksk.key_switch::<P>(acc);
+        let acc_lwe = ksk.key_switch::<P>(acc);
         acc_lwe.modswitch()
+    }
+
+    pub fn bootstrap(&self, ct: LweCiphertext<P::BaseInt>) -> LweCiphertext<P::BaseInt> {
+        self.bootstrap_with_ksk(ct, &self.ksk)
     }
 }
 
@@ -462,17 +535,24 @@ where
     P::BootInt: PrimeFiniteField,
     P::BaseInt: PrimeFiniteField,
 {
-    pub fn new(rng: &mut impl Rng) -> Self {
+    pub(crate) fn new_and_ntru(rng: &mut impl Rng) -> (Self, Poly<P::BootInt>) {
         let base = LWEKey::new(P::DIM_LWE, rng);
         let (boot, boot_coefs) = NTRUKey::new::<P>(rng);
         let ksk = KskNtruLwe::new::<P>(&boot_coefs, &base, rng);
         let bsk = Bsk::new::<P>(&boot, &base, rng);
 
-        Key {
-            base,
-            // boot,
-            public: PublicKey { ksk, bsk },
-        }
+        (
+            Key {
+                base,
+                // boot,
+                public: PublicKey { ksk, bsk },
+            },
+            boot_coefs,
+        )
+    }
+
+    pub fn new(rng: &mut impl Rng) -> Self {
+        Self::new_and_ntru(rng).0
     }
 
     pub fn export(&self) -> &PublicKey<P> {
@@ -651,7 +731,7 @@ mod test {
         let rng = &mut rng(None);
         let k1 = LWEKey::new(TestParams::DIM_LWE, rng);
         let k2 = [LWEKey::new(TestParams::DIM_LWE, rng)];
-        let ksk = KskLweLwe::new::<TestParams, _>(&k1, &k2, rng);
+        let ksk = KskLweLwe::new::<TestParams, _>(&k1, &k2, rng, KskNoise::PerParty);
         for _ in 0..100 {
             for b in 0..=1 {
                 let ct = k1.encrypt::<TestParams>(b, rng);

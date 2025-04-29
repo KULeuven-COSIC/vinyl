@@ -2,8 +2,8 @@ use vinyl::params::*;
 
 fn main() {
     let rng = &mut rand::rngs::OsRng;
-    type Params = OurParams;
-    let (clients, server) = vinyl::multiparty::setup::<Params, 10>(rng);
+    type Params = FinalParams;
+    let (clients, server) = vinyl::multiparty::setup::<Params, 5>(rng);
     println!("Ready");
     // for line in std::io::stdin().lines() {
     //     let line = line.unwrap();

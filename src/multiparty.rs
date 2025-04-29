@@ -1,7 +1,7 @@
 use swanky_field::PrimeFiniteField;
 
 use crate::ciphertext::{LweCiphertext, MKLweCiphertext};
-use crate::key::{Key, KskLweLwe, LWEKey, PublicKey};
+use crate::key::{Key, KskLweLwe, KskNoise, KskNtruMKLwe, LWEKey, PublicKey};
 use crate::modular::{int_to_field, ModSwitch, Modular};
 use crate::params::{Params, Rng};
 
@@ -33,7 +33,8 @@ impl std::borrow::Borrow<LWEKey> for Client {
 pub struct Server<P: Params, const N: usize> {
     evaluation_key: PublicKey<P>,
     input_ksks: [KskLweLwe<P::BaseInt, 1>; N],
-    output_ksk: KskLweLwe<P::BaseInt, N>,
+    // output_ksk: KskLweLwe<P::BaseInt, N>,
+    output_ksk: KskNtruMKLwe<P::BootInt, N>,
     secret_key: LWEKey, // TODO
 }
 
@@ -54,7 +55,15 @@ where
     }
 
     pub fn output(&self, ct: LweCiphertext<P::BaseInt>) -> MKLweCiphertext<P::BaseInt, N> {
-        self.output_ksk.keyswitch::<P>(ct)
+        // self.output_ksk.keyswitch::<P>(ct)
+        let (a, b) = ct.unpack();
+        self.evaluation_key.bootstrap_with_ksk(
+            LweCiphertext {
+                a: [a.into_iter().map(|ai| ai + ai).collect()],
+                b: b + b,
+            },
+            &self.output_ksk,
+        )
     }
 
     pub fn output_noise(
@@ -168,18 +177,21 @@ where
     P::BaseInt: PrimeFiniteField,
 {
     let mut clients = std::array::from_fn(|_| Client::new(P::DIM_LWE, rng));
-    let fhe_key = Key::new(rng);
+    let (fhe_key, ntru_key) = Key::new_and_ntru(rng);
     clients[0] = Client {
         key: fhe_key.base.clone(),
     };
     // TODO: improve on these clones
-    let input_ksks =
-        std::array::from_fn(|i| KskLweLwe::new::<P, _>(&clients[i].key, &[&fhe_key.base], rng));
-    let output_ksk = KskLweLwe::new::<P, _>(
-        &fhe_key.base,
-        &std::array::from_fn(|i| &clients[i].key),
-        rng,
-    );
+    let input_ksks = std::array::from_fn(|i| {
+        KskLweLwe::new::<P, _>(&clients[i].key, &[&fhe_key.base], rng, KskNoise::PerParty)
+    });
+    // let output_ksk = KskLweLwe::new::<P, _>(
+    // &fhe_key.base,
+    // &std::array::from_fn(|i| &clients[i].key),
+    // rng,
+    // KskNoise::Single,
+    // );
+    let output_ksk = KskNtruMKLwe::new_mk::<P>(&ntru_key, &clients, rng, KskNoise::Single);
     let secret_key = fhe_key.base.clone(); // TODO
     let server = Server {
         evaluation_key: fhe_key.take_public(),
