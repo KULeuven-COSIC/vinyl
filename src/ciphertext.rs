@@ -69,6 +69,14 @@ where
         out.bit_vartime(0) as u8
     }
 
+    pub(crate) fn double(self) -> Self {
+        let b = self.b + self.b;
+        MKLweCiphertext {
+            a: self.a.map(|aa| aa.into_iter().map(|ai| ai + ai).collect()),
+            b,
+        }
+    }
+
     pub fn decrypt<P: Params<BaseInt = F>, Key: std::borrow::Borrow<crate::key::LWEKey>>(
         self,
         keys: &[Key; N],

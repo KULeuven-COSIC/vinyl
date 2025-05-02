@@ -666,7 +666,7 @@ mod test {
 
     #[cfg(not(feature = "bench"))]
     #[test]
-    fn enc_ksk_dec() {
+    fn enc_ntru_ksk_dec() {
         let rng = &mut rng(None);
         let lwe_key = LWEKey::new(TestParams::DIM_LWE, rng);
         let (ntru_key, ntru_coefs) = NTRUKey::new::<TestParams>(rng);
@@ -701,26 +701,54 @@ mod test {
     }
 
     #[test]
+    fn enc_ksk_lwe_dec() {
+        let rng = &mut rng(None);
+        let k1 = LWEKey::new(TestParams::DIM_LWE, rng);
+        let k2 = LWEKey::new(TestParams::DIM_LWE, rng);
+        let ksk = KskLweLwe::<BaseInt, 1>::new::<TestParams, _>(&k1, &[&k2], rng, KskNoise::Single);
+
+        for _ in 0..100 {
+            for b in 0..=1 {
+                let ct = k1.encrypt::<TestParams>(b, rng);
+                let ct = ksk.keyswitch::<TestParams>(ct);
+                assert_eq!(k2.decrypt::<TestParams>(ct), b);
+            }
+        }
+    }
+
+    #[test]
+    fn enc_ksk_lwe_bootstrap_dec() {
+        let rng = &mut rng(None);
+        let (k, ntru) = Key::<TestParams>::new_and_ntru(rng);
+        let k_in = LWEKey::new(TestParams::DIM_LWE, rng);
+        let ksk =
+            KskLweLwe::<BaseInt, 1>::new::<TestParams, _>(&k_in, &[&k.base], rng, KskNoise::Single);
+        let ksk2 = KskNtruLwe::new_mk::<TestParams>(&ntru, &[&k_in], rng, KskNoise::Single);
+
+        for _ in 0..100 {
+            for b in 0..=1 {
+                let ct = k_in.encrypt::<TestParams>(b, rng);
+                let ct = ksk.keyswitch::<TestParams>(ct);
+                let ct = k.public.bootstrap(ct.double());
+                let ct = k.public.bootstrap_with_ksk(ct.double(), &ksk2);
+                assert_eq!(k_in.decrypt::<TestParams>(ct), b);
+            }
+        }
+    }
+
+    #[test]
     fn bootstrap() {
         let rng = &mut rng(None);
         let key = Key::<TestParams>::new(rng);
         let evk = key.export();
 
-        fn double(ct: LweCiphertext<BaseInt>) -> LweCiphertext<BaseInt> {
-            let (a, b) = ct.unpack();
-            LweCiphertext {
-                a: [a.into_iter().map(|ai| ai + ai).collect()],
-                b: b + b,
-            }
-        }
-
         for _ in 0..100 {
             for b in 0..=1 {
                 let ct = key.base.encrypt::<TestParams>(b, rng);
                 assert_eq!(key.base.decrypt::<TestParams>(ct.clone()), b);
-                let ct1 = evk.bootstrap(double(ct));
+                let ct1 = evk.bootstrap(ct.double());
                 assert_eq!(key.base.decrypt::<TestParams>(ct1.clone()), b);
-                let ct2 = evk.bootstrap(double(ct1));
+                let ct2 = evk.bootstrap(ct1.double());
                 assert_eq!(key.base.decrypt::<TestParams>(ct2), b);
             }
         }

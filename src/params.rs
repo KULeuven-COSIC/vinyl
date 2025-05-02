@@ -129,8 +129,8 @@ impl Params for WeirdParams {
 pub enum OurParams {}
 impl Params for OurParams {
     type BootInt = Q35;
-    type BaseInt = Q27;
-    type ExpRing = Z2k<12>;
+    type BaseInt = Q30;
+    type ExpRing = Z2k<{ Self::LOG_DEG_NTRU + 1 }>;
 
     const DIM_LWE: usize = 800;
     const LOG_DEG_NTRU: usize = 11;
@@ -268,6 +268,6 @@ impl Params for MKFinalParams {
 }
 
 #[cfg(test)]
-pub use MKFinalParams as TestParams;
+pub use FinalParams as TestParams;
 #[cfg(test)]
 pub type TESTTYPE = M31;

@@ -51,19 +51,14 @@ where
     pub fn input(&self, client: usize, ct: LweCiphertext<P::BaseInt>) -> LweCiphertext<P::BaseInt> {
         debug_assert!(client < N);
 
-        self.input_ksks[client].keyswitch::<P>(ct)
+        self.evaluation_key
+            .bootstrap(self.input_ksks[client].keyswitch::<P>(ct).double())
     }
 
     pub fn output(&self, ct: LweCiphertext<P::BaseInt>) -> MKLweCiphertext<P::BaseInt, N> {
         // self.output_ksk.keyswitch::<P>(ct)
-        let (a, b) = ct.unpack();
-        self.evaluation_key.bootstrap_with_ksk(
-            LweCiphertext {
-                a: [a.into_iter().map(|ai| ai + ai).collect()],
-                b: b + b,
-            },
-            &self.output_ksk,
-        )
+        self.evaluation_key
+            .bootstrap_with_ksk(ct.double(), &self.output_ksk)
     }
 
     pub fn output_noise(

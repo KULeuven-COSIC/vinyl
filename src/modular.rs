@@ -259,7 +259,7 @@ pub(crate) mod smallfields {
                 pub const HALF: $single = ($mod as $single) / 2;
                 pub const QUARTER: $single = ($mod as $single) / 4;
                 pub const EIGHT: $single = ($mod as $single) / 8;
-                pub const NBITS: u32 = ($mod as u128).ilog2();
+                pub const NBITS: u32 = ($mod as u128).ilog2() + 1;
             }
 
             #[allow(unused_imports)]
