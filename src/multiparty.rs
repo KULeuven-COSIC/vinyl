@@ -35,7 +35,6 @@ pub struct Server<P: Params, const N: usize> {
     input_ksks: [KskLweLwe<P::BaseInt, 1>; N],
     // output_ksk: KskLweLwe<P::BaseInt, N>,
     output_ksk: KskNtruMKLwe<P::BootInt, N>,
-    secret_key: LWEKey, // TODO
 }
 
 impl<P: Params, const N: usize> Server<P, N>
@@ -61,44 +60,44 @@ where
             .bootstrap_with_ksk(ct.double(), &self.output_ksk)
     }
 
-    pub fn output_noise(
-        &self,
-        ct: LweCiphertext<P::BaseInt>,
-        m: u8,
-        clients: &[Client; N],
-    ) -> (usize, usize) {
-        fn noise<P: Params, const N: usize>(
-            ct: MKLweCiphertext<P::BaseInt, N>,
-            key: &[impl std::borrow::Borrow<LWEKey>; N],
-            m: u8,
-        ) -> usize
-        where
-            P::BaseInt: PrimeFiniteField,
-        {
-            let mask =
-                ct.a.iter()
-                    .zip(key.iter())
-                    .flat_map(|(as_, k)| {
-                        as_.iter()
-                            .zip(k.borrow().iter(P::DIM_LWE))
-                            .map(|(ai, si): (&P::BaseInt, P::BaseInt)| *ai * si)
-                    })
-                    .sum::<P::BaseInt>();
-            let err = crate::modular::lift_centered(
-                ct.b + mask - P::scale_lwe() * int_to_field(m.into()),
-            );
-            if err.abs() == 0 {
-                0
-            } else {
-                err.abs().ilog2() as usize
-            }
-        }
+    // pub fn output_noise(
+    //     &self,
+    //     ct: LweCiphertext<P::BaseInt>,
+    //     m: u8,
+    //     clients: &[Client; N],
+    // ) -> (usize, usize) {
+    //     fn noise<P: Params, const N: usize>(
+    //         ct: MKLweCiphertext<P::BaseInt, N>,
+    //         key: &[impl std::borrow::Borrow<LWEKey>; N],
+    //         m: u8,
+    //     ) -> usize
+    //     where
+    //         P::BaseInt: PrimeFiniteField,
+    //     {
+    //         let mask =
+    //             ct.a.iter()
+    //                 .zip(key.iter())
+    //                 .flat_map(|(as_, k)| {
+    //                     as_.iter()
+    //                         .zip(k.borrow().iter(P::DIM_LWE))
+    //                         .map(|(ai, si): (&P::BaseInt, P::BaseInt)| *ai * si)
+    //                 })
+    //                 .sum::<P::BaseInt>();
+    //         let err = crate::modular::lift_centered(
+    //             ct.b + mask - P::scale_lwe() * int_to_field(m.into()),
+    //         );
+    //         if err.abs() == 0 {
+    //             0
+    //         } else {
+    //             err.abs().ilog2() as usize
+    //         }
+    //     }
 
-        (
-            noise::<P, 1>(ct.clone(), &[&self.secret_key], m),
-            noise::<P, N>(self.output(ct), clients, m),
-        )
-    }
+    //     (
+    //         noise::<P, 1>(ct.clone(), &[&self.secret_key], m),
+    //         noise::<P, N>(self.output(ct), clients, m),
+    //     )
+    // }
 
     /// bootstrap(`multiplier` * Δ/2 - (`a` + `b`))
     fn combine(
@@ -187,12 +186,10 @@ where
     // KskNoise::Single,
     // );
     let output_ksk = KskNtruMKLwe::new_mk::<P>(&ntru_key, &clients, rng, KskNoise::Single);
-    let secret_key = fhe_key.base.clone(); // TODO
     let server = Server {
         evaluation_key: fhe_key.take_public(),
         input_ksks,
         output_ksk,
-        secret_key, // TODO
     };
 
     (clients, server)

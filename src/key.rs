@@ -250,7 +250,6 @@ impl NTRUKey {
     }
 }
 
-// TODO: Generalize to mkLWE
 /// A key-switching key from NTRU to mk-LWE
 // Outer goes over the decomposition, inner over coefficients of f
 #[derive(Clone, Debug)]
@@ -581,7 +580,6 @@ mod test {
 
     #[cfg(not(feature = "bench"))]
     type BootInt = <TestParams as Params>::BootInt;
-    #[cfg(not(feature = "bench"))]
     type BaseInt = <TestParams as Params>::BaseInt;
 
     #[test]

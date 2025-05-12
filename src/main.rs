@@ -1,71 +1,66 @@
+use rand::Rng;
 use vinyl::params::*;
+
+struct Measure(String, std::time::Instant);
+impl Measure {
+    fn start(label: impl Into<String>) -> Self {
+        Self(label.into(), std::time::Instant::now())
+    }
+}
+impl Drop for Measure {
+    fn drop(&mut self) {
+        println!("{} took {:.2?}", self.0, self.1.elapsed());
+    }
+}
+
+macro_rules! measure {
+    ($label:expr, $rest:expr) => {{
+        let _m = Measure::start($label);
+        $rest
+    }};
+}
 
 fn main() {
     let rng = &mut rand::rngs::OsRng;
     type Params = FinalParams;
-    let (clients, server) = vinyl::multiparty::setup::<Params, 16>(rng);
-    println!("Ready");
-    // for line in std::io::stdin().lines() {
-    //     let line = line.unwrap();
-    //     let spl = line.split_whitespace().collect::<Vec<_>>();
-    //     let b0 = server.input(
-    //         0,
-    //         clients[0].encrypt::<Params>(spl[1].parse().unwrap(), rng),
-    //     );
-    //     let ct = if spl[0] == "not" {
-    //         server.not(&b0)
-    //     } else {
-    //         let b1 = server.input(
-    //             1,
-    //             clients[1].encrypt::<Params>(spl[2].parse().unwrap(), rng),
-    //         );
-    //         if spl[0] == "xor" {
-    //             server.xor(&b0, &b1)
-    //         } else if spl[0] == "nand" {
-    //             server.nand(&b0, &b1)
-    //         } else if spl[0] == "and" {
-    //             server.and(&b0, &b1)
-    //         } else if spl[0] == "or" {
-    //             server.or(&b0, &b1)
-    //         } else {
-    //             println!("Unknown gate {}", spl[0]);
-    //             continue;
-    //         }
-    //     };
-    //     println!("~> {}", server.output(ct).decrypt::<Params, _>(&clients));
-    // }
-    for _ in 0..100 {
-        for b0 in 0..=1 {
-            let ct0 = server.input(0, clients[0].encrypt::<Params>(b0, rng));
-            let xx = server.output_noise(ct0.clone(), b0, &clients);
-            println!("Straight bit: {b0} -> ({}, {})", xx.0, xx.1);
-            for b1 in 0..=1 {
-                let ct1 = server.input(
-                    clients.len() - 1,
-                    clients.last().unwrap().encrypt::<Params>(b1, rng),
-                );
+    const N: usize = 8;
+    println!("Number of parties: {N}");
+    let (clients, server) = measure!(
+        "Multiparty setup",
+        vinyl::multiparty::setup::<Params, N>(rng)
+    );
 
-                let not0 = server.not(&ct0);
-                let not1 = server.not(&ct1);
-                let xor = server.xor(&ct0, &ct1);
-                let nand = server.nand(&ct0, &ct1);
-                let and = server.and(&ct0, &ct1);
-                let or = server.or(&ct0, &ct1);
-
-                for (ct, v) in [
-                    (not0, 1 - b0),
-                    (not1, 1 - b1),
-                    (xor, b0 ^ b1),
-                    (nand, 1 - (b0 & b1)),
-                    (and, b0 & b1),
-                    (or, b0 | b1),
-                ] {
-                    let noises = server.output_noise(ct.clone(), v, &clients);
-                    println!("{b0}{b1} -> {v}: ({}, {})", noises.0, noises.1);
-                    assert_eq!(server.output(ct).decrypt::<Params, _>(&clients), v);
-                }
-                println!();
+    let mut bits = Vec::with_capacity(N * 128);
+    {
+        let _m = Measure::start("Input 128 bits per party");
+        for i in 0..128 {
+            for p in 0..N {
+                bits.push(server.input(p, clients[p].encrypt::<Params>(i & 1, rng)));
             }
         }
     }
+
+    {
+        let _m = Measure::start("100000 random gates");
+        for _ in 0..100000 {
+            let a = rng.gen_range(0..(N * 128));
+            let b = rng.gen_range(0..(N * 128));
+            bits[a] = server.nand(&bits[a], &bits[b]);
+        }
+    }
+
+    let mut outputs = Vec::with_capacity(N * 128);
+    {
+        let _m = Measure::start("Output bits");
+        for b in bits {
+            outputs.push(server.output(b));
+        }
+    }
+
+    let _ = measure!(
+        "Decrypt outputs",
+        outputs.into_iter().for_each(|o| {
+            o.decrypt::<Params, _>(&clients);
+        })
+    );
 }
