@@ -34,8 +34,8 @@ fn main() {
     {
         let _m = Measure::start("Input 128 bits per party");
         for i in 0..128 {
-            for p in 0..N {
-                bits.push(server.input(p, clients[p].encrypt::<Params>(i & 1, rng)));
+            for (p, c) in clients.iter().enumerate() {
+                bits.push(server.input(p, c.encrypt::<Params>(i & 1, rng)));
             }
         }
     }
@@ -57,7 +57,7 @@ fn main() {
         }
     }
 
-    let _ = measure!(
+    measure!(
         "Decrypt outputs",
         outputs.into_iter().for_each(|o| {
             o.decrypt::<Params, _>(&clients);

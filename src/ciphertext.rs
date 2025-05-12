@@ -77,6 +77,7 @@ where
         }
     }
 
+    #[allow(private_bounds)]
     pub fn decrypt<P: Params<BaseInt = F>, Key: std::borrow::Borrow<crate::key::LWEKey>>(
         self,
         keys: &[Key; N],
@@ -84,7 +85,7 @@ where
     where
         P::BaseInt: PrimeFiniteField,
     {
-        self.decrypt_explicit(&keys, P::DIM_LWE, P::half_scale_lwe(), P::scale_lwe())
+        self.decrypt_explicit(keys, P::DIM_LWE, P::half_scale_lwe(), P::scale_lwe())
     }
 }
 

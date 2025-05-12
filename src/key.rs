@@ -270,6 +270,7 @@ impl<F: PrimeFiniteField, const N: usize> KskNtruMKLwe<F, N> {
     /// Build a KSK that transfers from ciphertext under the ntru key
     /// to ciphertexts under the lwe key
     #[cfg_vis::cfg_vis(feature = "bench", pub)]
+    #[allow(private_interfaces)]
     pub(crate) fn new_mk<P: Params<BootInt = F>>(
         ntru: &Poly<F>,
         lwes: &[impl std::borrow::Borrow<LWEKey>; N],
@@ -356,6 +357,7 @@ pub(crate) struct KskLweLwe<F, const N: usize>(Vec<Vec<Vec<MKLweCiphertext<F, N>
 
 impl<F: PrimeFiniteField, const N: usize> KskLweLwe<F, N> {
     #[cfg_vis::cfg_vis(feature = "bench", pub)]
+    #[allow(private_interfaces)]
     pub(crate) fn new<P: Params<BaseInt = F>, Key: std::borrow::Borrow<LWEKey>>(
         from: &LWEKey,
         to: &[Key; N],

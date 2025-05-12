@@ -5,7 +5,7 @@ use std::ops::IndexMut;
 #[cfg(test)]
 use crate::modular::M31;
 
-use crate::modular::{Modular, Z2k, Q17, Q20, Q27, Q30, Q35};
+use crate::modular::{Modular, Z2k, Q17, Q20, Q30, Q35};
 
 /// A cryptographically secure RNG trait for convenience
 pub trait Rng: rand::Rng + rand::CryptoRng {}
