@@ -210,4 +210,105 @@ fn keygen(c: &mut Criterion) {
     });
 }
 
+criterion_group!(
+    bench_multiparty,
+    multiparty_keygen,
+    multiparty_input,
+    multiparty_output,
+    multiparty_mk_decrypt,
+    multiparty_gates
+);
+
+fn multiparty_keygen(c: &mut Criterion) {
+    let rng = &mut OsRng;
+    c.bench_function("multiparty_keygen (8 parties)", |bencher| {
+        bencher.iter(|| vinyl::multiparty::setup::<FinalParams, 8>(rng))
+    });
+}
+
+fn multiparty_input(c: &mut Criterion) {
+    let rng = &mut OsRng;
+    let (clients, server) = vinyl::multiparty::setup::<FinalParams, 8>(rng);
+    c.bench_function("multiparty input (8 parties)", move |bencher| {
+        bencher.iter_batched(
+            || {
+                let i = rng.gen_range(0..8);
+                (
+                    i,
+                    clients[i].encrypt::<FinalParams>(rng.gen_range(0..=1), rng),
+                )
+            },
+            |(i, ct)| {
+                server.input(i, ct);
+            },
+            criterion::BatchSize::SmallInput,
+        )
+    });
+}
+
+fn multiparty_output(c: &mut Criterion) {
+    let rng = &mut OsRng;
+    let (clients, server) = vinyl::multiparty::setup::<FinalParams, 8>(rng);
+    c.bench_function("multiparty output (8 parties)", move |bencher| {
+        bencher.iter_batched(
+            || {
+                let i = rng.gen_range(0..8);
+                server.input(
+                    i,
+                    clients[i].encrypt::<FinalParams>(rng.gen_range(0..=1), rng),
+                )
+            },
+            |ct| {
+                server.output(ct);
+            },
+            criterion::BatchSize::SmallInput,
+        )
+    });
+}
+
+fn multiparty_mk_decrypt(c: &mut Criterion) {
+    let rng = &mut OsRng;
+    let (clients, server) = vinyl::multiparty::setup::<FinalParams, 8>(rng);
+    c.bench_function("multiparty output (8 parties)", move |bencher| {
+        bencher.iter_batched(
+            || {
+                let i = rng.gen_range(0..8);
+                server.output(server.input(
+                    i,
+                    clients[i].encrypt::<FinalParams>(rng.gen_range(0..=1), rng),
+                ))
+            },
+            |ct| {
+                ct.decrypt::<FinalParams, _>(&clients);
+            },
+            criterion::BatchSize::SmallInput,
+        )
+    });
+}
+
+fn multiparty_gates(c: &mut Criterion) {
+    let rng = &mut OsRng;
+    let (clients, server) = vinyl::multiparty::setup::<FinalParams, 8>(rng);
+    c.bench_function("multiparty nand gate (8 parties)", move |bencher| {
+        bencher.iter_batched(
+            || {
+                let i = rng.gen_range(0..8);
+                let j = rng.gen_range(0..8);
+                (
+                    server.input(
+                        i,
+                        clients[i].encrypt::<FinalParams>(rng.gen_range(0..=1), rng),
+                    ),
+                    server.input(
+                        j,
+                        clients[j].encrypt::<FinalParams>(rng.gen_range(0..=1), rng),
+                    ),
+                )
+            },
+            |(a, b)| server.nand(&a, &b),
+            criterion::BatchSize::SmallInput,
+        )
+    });
+}
+
 // TODO? Look at performance of some of the modular stuff
