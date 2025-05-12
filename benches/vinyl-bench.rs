@@ -12,7 +12,13 @@ use swanky_field::FiniteRing;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 
-criterion_main!(bench_lwe, bench_fft, bench_bootstrap, bench_keygen);
+criterion_main!(
+    bench_lwe,
+    bench_fft,
+    bench_bootstrap,
+    bench_keygen,
+    bench_multiparty
+);
 
 criterion_group!(bench_lwe, lwe_enc, lwe_dec);
 fn lwe_enc(c: &mut Criterion) {
