@@ -170,11 +170,8 @@ where
     P::BootInt: PrimeFiniteField,
     P::BaseInt: PrimeFiniteField,
 {
-    let mut clients = std::array::from_fn(|_| Client::new(P::DIM_LWE, rng));
+    let clients = std::array::from_fn(|_| Client::new(P::DIM_LWE, rng));
     let (fhe_key, ntru_key) = Key::new_and_ntru(rng);
-    clients[0] = Client {
-        key: fhe_key.base.clone(),
-    };
     // TODO: improve on these clones
     let input_ksks = std::array::from_fn(|i| {
         KskLweLwe::new::<P, _>(&clients[i].key, &[&fhe_key.base], rng, KskNoise::PerParty)
