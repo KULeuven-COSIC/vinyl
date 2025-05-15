@@ -309,7 +309,7 @@ fn multiparty_mk_decrypt(c: &mut Criterion) {
             let rng = &mut OsRng;
             let (clients, server) = vinyl::multiparty::setup::<FinalParams, $n>(rng);
             c.bench_function(
-                &format!("multiparty output ({} parties)", $n),
+                &format!("multiparty decrypt ({} parties)", $n),
                 move |bencher| {
                     bencher.iter_batched(
                         || {
