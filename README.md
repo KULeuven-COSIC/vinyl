@@ -1,7 +1,7 @@
 # Vinyl <sup><sub>(*/vī′nəl/*)</sub></sup>
 
 A toy implementation of single-key and multiparty FHE, based on [FINAL](https://doi.org/10.1007/978-3-031-22966-4_7),
-accompanying the paper `Multi-Party FHE Redefined: A Framework for Unlimited Participants`.
+accompanying the paper [Multi-Party FHE Redefined: A Framework for Unlimited Participants](https://eprint.iacr.org/2025/965).
 
 ## Running
 
