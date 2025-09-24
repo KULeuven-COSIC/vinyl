@@ -4,7 +4,7 @@ use rand::{rngs::OsRng, Rng};
 use vinyl::{
     bench::{fft::FFTPlan, poly::Poly},
     ciphertext::NtruScalarCiphertext,
-    key::{Bsk, Key, KskNtruLwe, LWEKey, NTRUKey},
+    key::{Bsk, Key, KskLweLwe, KskNoise, KskNtruLwe, LWEKey, NTRUKey},
     params::{FinalParams, Params},
 };
 type BootInt = <FinalParams as Params>::BootInt;
@@ -96,7 +96,7 @@ fn complex_mult(c: &mut Criterion) {
 criterion_group!(
     name = bench_bootstrap;
     config = Criterion::default().measurement_time(Duration::from_secs(20));
-    targets = single_bootstrap, double_bootstrap, /* ext_prod, */ keyswitch
+    targets = single_bootstrap, double_bootstrap, /* ext_prod, */ keyswitch, keyswitch_lwe
 );
 
 fn single_bootstrap(c: &mut Criterion) {
@@ -159,7 +159,7 @@ fn keyswitch(c: &mut Criterion) {
     let ksk = KskNtruLwe::new::<FinalParams>(&ntru_coefs, &lwe, rng);
     let fft = FinalParams::fft();
 
-    c.bench_function("keyswitch", |bencher| {
+    c.bench_function("keyswitch (ngs->lwe)", |bencher| {
         bencher.iter_batched(
             || {
                 scalar_one
@@ -167,6 +167,21 @@ fn keyswitch(c: &mut Criterion) {
                     .external_product::<FinalParams>(&ntru.enc_bit_vec::<FinalParams>(0, rng), fft)
             },
             |ct| ksk.key_switch::<FinalParams>(ct),
+            criterion::BatchSize::SmallInput,
+        )
+    });
+}
+
+fn keyswitch_lwe(c: &mut Criterion) {
+    let rng = &mut OsRng;
+    let lwe1 = LWEKey::new(FinalParams::DIM_LWE, rng);
+    let lwe2 = LWEKey::new(FinalParams::DIM_LWE, rng);
+    let ksk = KskLweLwe::new::<FinalParams, _>(&lwe1, &[lwe2], rng, KskNoise::Single);
+
+    c.bench_function("keyswitch (lwe->lwe)", |bencher| {
+        bencher.iter_batched(
+            || lwe1.encrypt::<FinalParams>(rng.gen_range(0..=1), rng),
+            |ct| ksk.keyswitch::<FinalParams>(ct),
             criterion::BatchSize::SmallInput,
         )
     });

@@ -260,6 +260,7 @@ pub(crate) struct KskNtruMKLwe<F, const N: usize>(Vec<Vec<MKLweCiphertext<F, N>>
 #[cfg_vis::cfg_vis(feature = "bench", pub)]
 pub(crate) type KskNtruLwe<F> = KskNtruMKLwe<F, 1>;
 
+#[cfg_vis::cfg_vis(feature = "bench", pub)]
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum KskNoise {
     Single,
